@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Frontend build/cache output
+dist/
+*.tsbuildinfo
+vite-dev.*.log
+
+# Local environment
+.env
+.env.local
+.env.*.local
+*.local
+
+# AI / Trellis local workflow files
+.trellis/
+.agents/
+.claude/
+.codex/
+AGENTS.md
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
