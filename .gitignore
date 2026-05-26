@@ -19,6 +19,9 @@ vite-dev.*.log
 .codex/
 AGENTS.md
 
+# references
+references/
+
 # OS / editor noise
 .DS_Store
 Thumbs.db
@@ -26,3 +29,12 @@ Thumbs.db
 *.swo
 .vscode/
 .idea/
+# Chat data (private)
+texts/
+
+backend/test_output.json
+backend/test_fallback_report.json
+backend/data/
+backend/venv/
+backend/.env
+backend/__pycache__/

@@ -1,4 +1,4 @@
-import { ArrowRight, LockKeyhole, Share2, Sparkles, Upload } from "lucide-react";
+import { Upload } from "lucide-react";
 import { Link } from "react-router-dom";
 
 export function LandingPage() {
@@ -16,39 +16,29 @@ export function LandingPage() {
         </nav>
 
         <div className="hero-content">
-          <p className="eyebrow">微信聊天记录锐评报告</p>
-          <h1>上传聊天记录，生成一份全群都想转发的赛博体检。</h1>
+          <p className="eyebrow">微信聊天记录 AI 锐评报告</p>
+          <h1>上传聊天记录，生成全群都想转发的赛博体检报告。</h1>
           <p>
-            先用 mock 数据跑通全链路，等 2 / 3 / 5 号接口到位后无缝替换。
-            原始消息只在浏览器内处理，不作为产品数据保存。
+            支持 WeFlow JSON 格式。45+ 个统计维度，
+            多段 LLM 分析、AI 锐评、个性勋章、赛博占卜和年度分镜。
           </p>
           <div className="hero-actions">
             <Link className="btn btn-primary" to="/upload">
               <Upload size={18} />
-              <span>上传 txt</span>
-            </Link>
-            <Link className="btn btn-secondary" to="/report/demo-report-001">
-              <Sparkles size={18} />
-              <span>看 Demo 报告</span>
-            </Link>
-            <Link className="btn btn-secondary" to="/upload?type=relationship">
-              <Share2 size={18} />
-              <span>测双人关系</span>
+              <span>上传聊天记录</span>
             </Link>
           </div>
         </div>
 
-        <div className="hero-preview" aria-label="Demo 报告预览">
+        <div className="hero-preview" aria-label="报告预览">
           <div className="preview-phone">
             <div className="preview-screen">
               <p>群聊人格样本</p>
-              <h2>深夜放毒嘴硬互助会</h2>
+              <h2>你们群的 AI 体检报告</h2>
               <div className="preview-bars">
-                <span />
-                <span />
-                <span />
+                <span /><span /><span />
               </div>
-              <blockquote>你们不是没有作息，只是作息长得比较抽象。</blockquote>
+              <blockquote>数据不会说谎，只会锐评。</blockquote>
             </div>
           </div>
         </div>
@@ -57,49 +47,34 @@ export function LandingPage() {
       <section className="feature-band">
         <article>
           <Upload />
-          <h2>导入低门槛</h2>
-          <p>拖拽、点击、粘贴三种入口，先支持微信 PC txt。</p>
+          <h2>拖拽上传</h2>
+          <p>支持 WeFlow JSON，拖拽或粘贴即可。</p>
         </article>
         <article>
-          <LockKeyhole />
-          <h2>隐私先行</h2>
-          <p>默认脱敏，后端只接收结构化消息和统计结果。</p>
+          <span className="feature-icon">📊</span>
+          <h2>45 维分析</h2>
+          <p>热力图、词云、雷达图、情绪检测、作息鉴定、人格勋章。</p>
         </article>
         <article>
-          <Share2 />
-          <h2>出片可分享</h2>
-          <p>报告页、分享页、二维码和长图导出全部预留，也支持双人关系报告。</p>
+          <span className="feature-icon">🤖</span>
+          <h2>AI 锐评</h2>
+          <p>LLM 生成群聊人设、龙王锐评、金句点评、赛博占卜。</p>
         </article>
-      </section>
-
-      <section className="demo-strip">
-        <div>
-          <p className="eyebrow">D1 联调目标</p>
-          <h2>不等真实接口，先把群聊和双人关系两条线都跑通。</h2>
-          <p>
-            前端当前内置 role 2 / 3 / 5 的 mock 合同，后续只替换 API
-            适配层，不推倒页面。
-          </p>
-        </div>
-        <Link className="btn btn-ghost" to="/upload">
-          <span>进入上传页</span>
-          <ArrowRight size={18} />
-        </Link>
       </section>
 
       <section className="faq-band">
         <h2>FAQ</h2>
         <details>
-          <summary>现在没有后端可以看效果吗？</summary>
-          <p>可以。当前默认 mock 模式，上传后会生成 demo 报告。</p>
+          <summary>支持哪些聊天格式？</summary>
+          <p>当前稳定接入 WeFlow 导出的 .json 格式。</p>
         </details>
         <details>
-          <summary>原始聊天会保存吗？</summary>
-          <p>前端只在本次页面流程里读取文本，接口合同要求不上传原始文件。</p>
+          <summary>聊天数据会上传到服务器吗？</summary>
+          <p>会提交给本地后端完成解析、统计和 LLM 生成；开启脱敏后昵称会替换为 A同学、B同学。</p>
         </details>
         <details>
-          <summary>Streamlit 能不能用？</summary>
-          <p>可以作为内部调试台，但正式分享页面使用 React 前端。</p>
+          <summary>如何导出微信聊天记录？</summary>
+          <p>使用 WeFlow 打开目标聊天，导出 JSON 后上传到这里。</p>
         </details>
       </section>
     </main>

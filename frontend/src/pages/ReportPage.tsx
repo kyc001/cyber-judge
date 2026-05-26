@@ -1,147 +1,124 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Copy, Download, Home, ImageDown, Loader2, Share2 } from "lucide-react";
-import html2canvas from "html2canvas";
+import { useEffect, useMemo, useState } from "react";
+import { BarChart3, Copy, Download, Home, Loader2, Share2, Upload } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
-import { createShare, getReport } from "../api/client";
+import { createShare, exportReport, getReport } from "../api/client";
 import { ReportRenderer } from "../components/report/ReportRenderer";
 import { Button } from "../components/ui/Button";
-import type { ReportPayload } from "../contracts/report";
+import { ThemeToggle } from "../theme/ThemeSystem";
+import type { ExportFormat, ReportPayload } from "../contracts/report";
 import { getPublicUrl } from "../utils/format";
 
 export function ReportPage() {
-  const { id = "demo-report-001" } = useParams();
-  const reportRef = useRef<HTMLElement | null>(null);
+  const { id } = useParams();
+  const reportId = id || "";
   const [report, setReport] = useState<ReportPayload | null>(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
-  const [isExporting, setIsExporting] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<ExportFormat | "">("");
   const [shareUrl, setShareUrl] = useState(
-    getPublicUrl(`/share/${id.includes("relationship") ? "demo-relationship" : "demo-longwang"}`),
+    getPublicUrl(`/share/${reportId}`),
   );
   const [notice, setNotice] = useState("");
   const [scrollPercent, setScrollPercent] = useState(0);
 
-  const publicShareUrl = useMemo(() => shareUrl || getPublicUrl(`/share/${id}`), [id, shareUrl]);
+  const publicShareUrl = useMemo(() => shareUrl || getPublicUrl(`/share/${reportId}`), [reportId, shareUrl]);
 
+  // Load report
   useEffect(() => {
     let active = true;
     setIsLoading(true);
-    getReport(id)
+    getReport(reportId)
       .then((payload) => {
         if (active) {
           setReport(payload);
-          setShareUrl(
-            getPublicUrl(
-              `/share/${payload.share.slug || (payload.report_type === "relationship" ? "demo-relationship" : "demo-longwang")}`,
-            ),
-          );
+          setShareUrl(getPublicUrl(`/share/${payload.share.slug || reportId}`));
         }
       })
       .catch((caught) => {
-        if (active) {
-          setError(caught instanceof Error ? caught.message : "报告加载失败");
-        }
+        if (active) setError(caught instanceof Error ? caught.message : "报告加载失败");
       })
-      .finally(() => {
-        if (active) {
-          setIsLoading(false);
-        }
-      });
+      .finally(() => { if (active) setIsLoading(false); });
+    return () => { active = false; };
+  }, [reportId]);
 
-    return () => {
-      active = false;
-    };
-  }, [id]);
-
+  // Scroll progress
   useEffect(() => {
     function updateScroll() {
       const max = document.documentElement.scrollHeight - window.innerHeight;
       setScrollPercent(max <= 0 ? 0 : Math.round((window.scrollY / max) * 100));
     }
-
-    updateScroll();
     window.addEventListener("scroll", updateScroll, { passive: true });
     return () => window.removeEventListener("scroll", updateScroll);
   }, []);
 
-  async function ensureShare() {
-    const payload = await createShare(id);
+  // Copy link
+  const ensureShareUrl = async () => {
+    if (report?.share.slug) return publicShareUrl;
+    const payload = await createShare(reportId);
+    setReport(payload.report);
     setShareUrl(payload.url);
     return payload.url;
-  }
+  };
 
-  async function copyLink() {
+  const copyLink = async () => {
     try {
-      const url = await ensureShare();
+      const url = await ensureShareUrl();
       await navigator.clipboard.writeText(url);
-      setNotice("分享链接已复制");
-    } catch {
-      setNotice("复制失败，请手动复制地址栏链接");
-    }
-  }
+      setNotice("链接已复制");
+    } catch { setNotice("分享链接生成失败"); }
+    setTimeout(() => setNotice(""), 2000);
+  };
 
-  async function exportImage() {
-    if (!reportRef.current) {
+  const exportFile = async (format: ExportFormat) => {
+    if (exportingFormat) return;
+    setExportingFormat(format);
+    try {
+      const data = await exportReport(reportId, format);
+      const blob = new Blob([data.content], { type: data.content_type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = data.filename;
+      a.click(); URL.revokeObjectURL(url);
+      setNotice(`${format.toUpperCase()}已下载`);
+    } catch { setNotice("导出失败"); }
+    setExportingFormat("");
+    setTimeout(() => setNotice(""), 2000);
+  };
+
+  const systemShare = async () => {
+    let url = publicShareUrl;
+    try {
+      url = await ensureShareUrl();
+    } catch {
+      setNotice("分享链接生成失败");
+      setTimeout(() => setNotice(""), 2000);
       return;
     }
+    if (navigator.share) {
+      try { await navigator.share({ title: report?.title, url }); }
+      catch {}
+    } else { copyLink(); }
+  };
 
-    setIsExporting(true);
-    setNotice("");
-    try {
-      const canvas = await html2canvas(reportRef.current, {
-        backgroundColor: "#f7f0e8",
-        scale: 2,
-        useCORS: true,
-      });
-      const url = canvas.toDataURL("image/png");
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${id}-report.png`;
-      link.click();
-      setNotice("长图已生成");
-    } catch {
-      setNotice("生成长图失败，稍后可以换浏览器再试");
-    } finally {
-      setIsExporting(false);
-    }
-  }
-
-  async function systemShare() {
-    try {
-      const url = await ensureShare();
-      if (!navigator.share) {
-        setNotice("当前浏览器不支持系统分享，已为你生成链接");
-        await navigator.clipboard.writeText(url);
-        return;
-      }
-
-      await navigator.share({
-        title: report?.title ?? "赛博判官聊天报告",
-        text: report?.share.hook ?? "来测测你在群里是几号龙王",
-        url,
-      });
-    } catch {
-      setNotice("分享被取消或失败");
-    }
-  }
-
+  // Use counter for hero stats
   if (isLoading) {
     return (
-      <main className="page state-page">
-        <Loader2 className="spin" />
-        <p>报告加载中...</p>
+      <main className="page report-page">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", flexDirection: "column", gap: "1rem" }}>
+          <Loader2 className="spin" size={48} />
+          <p style={{ color: "var(--text-secondary)" }}>加载报告中...</p>
+        </div>
       </main>
     );
   }
 
   if (error || !report) {
     return (
-      <main className="page state-page">
-        <h1>报告暂时走丢了</h1>
-        <p>{error || "没有拿到可渲染的数据。"}</p>
-        <Link className="btn btn-primary" to="/upload">
-          重新上传
-        </Link>
+      <main className="page report-page">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", flexDirection: "column", gap: "1rem" }}>
+          <p>{error || "报告暂时走丢了"}</p>
+          <Link to="/upload">重新上传</Link>
+        </div>
       </main>
     );
   }
@@ -150,20 +127,35 @@ export function ReportPage() {
     <main className="page report-page">
       <div className="scroll-progress" style={{ width: `${scrollPercent}%` }} />
       <nav className="report-toolbar">
-        <Link className="icon-link" to="/" title="回到首页">
+        <Link className="icon-link" to="/" title="首页">
           <Home size={18} />
         </Link>
+        <Link className="icon-link" to="/upload" title="上传新文件" style={{ marginLeft: 8 }}>
+          <Upload size={18} />
+        </Link>
+        <Link className="icon-link" to={`/insights/${reportId}/annual`} title="年度分镜" style={{ marginLeft: 8 }}>
+          <BarChart3 size={18} />
+        </Link>
+        <ThemeToggle />
         <div className="toolbar-actions">
           <Button icon={<Copy size={18} />} onClick={copyLink} variant="secondary">
             复制链接
           </Button>
           <Button
-            disabled={isExporting}
-            icon={isExporting ? <Loader2 className="spin" size={18} /> : <ImageDown size={18} />}
-            onClick={exportImage}
+            disabled={Boolean(exportingFormat)}
+            icon={exportingFormat === "json" ? <Loader2 className="spin" size={18} /> : <Download size={18} />}
+            onClick={() => exportFile("json")}
             variant="secondary"
           >
-            保存长图
+            导出JSON
+          </Button>
+          <Button
+            disabled={Boolean(exportingFormat)}
+            icon={exportingFormat === "html" ? <Loader2 className="spin" size={18} /> : <Download size={18} />}
+            onClick={() => exportFile("html")}
+            variant="secondary"
+          >
+            导出HTML
           </Button>
           <Button icon={<Share2 size={18} />} onClick={systemShare}>
             系统分享
@@ -172,7 +164,7 @@ export function ReportPage() {
       </nav>
 
       {notice ? <div className="toast">{notice}</div> : null}
-      <section ref={reportRef}>
+      <section>
         <ReportRenderer report={report} shareUrl={publicShareUrl} />
       </section>
       <div className="next-hint">
