@@ -14,6 +14,7 @@ import {
   DualReportExtrasCard,
   EmojiBoard,
   EmojiCommonalityPanel,
+  EmojiInlineList,
   EmojiSpecificityChart,
   EnhancedDNACard,
   FamousQuotesPanel,
@@ -37,21 +38,20 @@ import {
   WordSpecificityChart,
 } from "../components/report/Charts";
 import type { ReportPayload } from "../contracts/report";
-import { clamp } from "../utils/format";
 
 type InsightView =
-  | "annual" | "time" | "language" | "emoji" | "interaction"
+  | "summary" | "time" | "language" | "emoji" | "interaction"
   | "emotion" | "media" | "relationship" | "quotes" | "predictions";
 
 const VIEW_META: { id: InsightView; title: string; body: string }[] = [
-  { id: "annual", title: "年度总览", body: "把总量、跨度、峰值、连续聊天和聊天 DNA 做成年度报告式总览。" },
+  { id: "summary", title: "聊天总览", body: "把总量、时间跨度、峰值、连续聊天和聊天 DNA 做成总览。" },
   { id: "time", title: "时间与作息", body: "拆解 24 小时活跃曲线、星期偏好、个人作息指纹和深夜占比。" },
   { id: "language", title: "语言与梗", body: "展示词云、个人口头禅、共同词汇、n-gram 热词和名场面候选。" },
   { id: "emoji", title: "表情包档案", body: "合并中英文微信表情别名，展示表情偏好、共性、专属性和出现时间。" },
   { id: "interaction", title: "互动网络", body: "把发言占比、快速接话、@ 提及、主动破冰和链接分享集中看。" },
   { id: "emotion", title: "情绪温度", body: "查看整体情绪、月度情绪趋势和每个人的情绪标签。" },
   { id: "media", title: "消息结构", body: "聚合文本、图片、表情、文件、链接、撤回、红包和类型演变。" },
-  { id: "relationship", title: "关系 K 线", body: "用关系指标、里程碑和月度互动差值构造关系走势视图。" },
+  { id: "relationship", title: "关系走势", body: "用月度互动量、双方发言差异、里程碑和最初对话展示关系变化。" },
   { id: "quotes", title: "名场面回放", body: "把真实聊天里的高分句子、代表语录和最初对话做成回放页。" },
   { id: "predictions", title: "赛博占卜", body: "AI 基于趋势给出未来预测、人格勋章和下一阶段看点。" },
 ];
@@ -71,7 +71,7 @@ const gridStyle = {
 
 function ViewIcon({ id }: { id: InsightView }) {
   const props = { size: 22 };
-  if (id === "annual") return <CalendarDays {...props} />;
+  if (id === "summary") return <CalendarDays {...props} />;
   if (id === "time") return <Clock3 {...props} />;
   if (id === "language") return <Languages {...props} />;
   if (id === "emoji") return <Image {...props} />;
@@ -116,8 +116,8 @@ function sectionBody(report: ReportPayload, ids: string[]) {
 function getAiBrief(report: ReportPayload, view: InsightView) {
   const stats = report.stats;
   const briefs: Record<InsightView, string> = {
-    annual: sectionBody(report, ["chat-dna", "summary"]) ||
-      `AI 先看总账：${stats.chat_dna?.total_messages ?? 0} 条消息、${stats.chat_dna?.active_days ?? 0} 个活跃日，最值得关注的是聊天节奏和年度主角。`,
+    summary: sectionBody(report, ["chat-dna", "summary"]) ||
+      `AI 先看总账：${stats.chat_dna?.total_messages ?? 0} 条消息、${stats.chat_dna?.active_days ?? 0} 个活跃日，最值得关注的是聊天节奏和高频成员。`,
     time: sectionBody(report, ["heatmap", "chronotype", "monthly"]) ||
       `AI 判断黄金时段在 ${stats.chat_dna?.top_hour ?? "未知"} 点，作息页会重点看谁在深夜撑起聊天量。`,
     language: sectionBody(report, ["keywords", "specificity", "commonality"]) ||
@@ -131,7 +131,7 @@ function getAiBrief(report: ReportPayload, view: InsightView) {
     media: sectionBody(report, ["msg-types", "links"]) ||
       "AI 会根据文字、图片、表情、链接、红包、撤回等结构判断聊天的表达方式，而不是只看消息数量。",
     relationship: sectionBody(report, ["relationship-summary", "relationship-radar", "relationship-timeline"]) ||
-      "AI 会把关系走势当作时间序列看：互动总量、双方平衡度、里程碑和断联重连共同决定走势。",
+      "AI 会把关系走势当作时间序列看：互动总量、双方发言差异、里程碑和断联重连共同决定观察重点。",
     quotes: report.quotes[0]?.comment ||
       "AI 会优先挑真实出现过、有记忆点、能代表聊天氛围的原话，而不是重新编造金句。",
     predictions: sectionBody(report, ["predictions"]) ||
@@ -224,11 +224,11 @@ function PageShell({
   );
 }
 
-function AnnualView({ report }: { report: ReportPayload }) {
+function SummaryView({ report }: { report: ReportPayload }) {
   const stats = report.stats;
   return (
     <>
-      <SectionBlock kicker="年度" title="年度总账">
+      <SectionBlock kicker="总览" title="聊天总账">
         <AnnualSummaryCard annual={stats.annual_summary} />
       </SectionBlock>
       <SectionBlock kicker="基因" title="聊天基因">
@@ -291,15 +291,15 @@ function EmojiView({ report }: { report: ReportPayload }) {
       <SectionBlock kicker="表情" title="表情偏好">
         <div className="v2-stack">
           <EmojiBoard emojis={stats.emojis} />
-          <EmojiSpecificityChart items={stats.emoji_specificity} />
+          <EmojiSpecificityChart catalog={stats.emojis} items={stats.emoji_specificity} />
           <EmojiCommonalityPanel byHour={stats.emoji_time_distribution} items={stats.emoji_commonality} />
         </div>
       </SectionBlock>
       {stats.dual_report_extras ? (
         <SectionBlock kicker="专属" title="双人专属表情">
           <MetricGrid items={[
-            ["A 专属", stats.dual_report_extras.p1_exclusive_emojis.map((e) => `${e.emoji}×${e.count}`).join("、") || "暂无"],
-            ["B 专属", stats.dual_report_extras.p2_exclusive_emojis.map((e) => `${e.emoji}×${e.count}`).join("、") || "暂无"],
+            ["A 专属", <EmojiInlineList items={stats.dual_report_extras.p1_exclusive_emojis} />],
+            ["B 专属", <EmojiInlineList items={stats.dual_report_extras.p2_exclusive_emojis} />],
           ]} />
         </SectionBlock>
       ) : null}
@@ -386,46 +386,34 @@ function RelationshipCandles({ report }: { report: ReportPayload }) {
     p1_count: m.count,
     p2_count: Math.round(m.count * 0.72),
   }));
-  const maxTotal = Math.max(1, ...monthly.map((m) => m.p1_count + m.p2_count));
-  let previous = 50;
-  const candles = monthly.slice(-8).map((m) => {
-    const total = m.p1_count + m.p2_count;
-    const balance = total ? 1 - Math.abs(m.p1_count - m.p2_count) / total : 0;
-    const close = clamp(35 + balance * 35 + (total / maxTotal) * 30, 0, 100);
-    const open = previous;
-    previous = close;
-    return {
-      close,
-      high: Math.max(open, close) + 6,
-      label: m.label,
-      low: Math.max(0, Math.min(open, close) - 6),
-      open,
-      total,
-    };
-  });
+  const rows = monthly.slice(-8).map((m) => ({
+    ...m,
+    total: m.p1_count + m.p2_count,
+  }));
+  const maxTotal = Math.max(1, ...rows.map((m) => m.total));
 
   return (
     <div style={{ ...cardStyle, display: "grid", gap: 12 }}>
-      <strong>关系 K 线</strong>
-      <div style={{ alignItems: "end", display: "flex", gap: 10, height: 180 }}>
-        {candles.map((c) => {
-          const top = 100 - clamp(c.high, 0, 100);
-          const bottom = clamp(c.low, 0, 100);
-          const bodyBottom = Math.min(c.open, c.close);
-          const bodyTop = Math.max(c.open, c.close);
-          const rising = c.close >= c.open;
-          return (
-            <div key={c.label} style={{ alignItems: "center", display: "flex", flex: 1, flexDirection: "column", height: "100%", justifyContent: "end" }} title={`O ${c.open.toFixed(1)} / H ${c.high.toFixed(1)} / L ${c.low.toFixed(1)} / C ${c.close.toFixed(1)}`}>
-              <div style={{ height: 140, position: "relative", width: "100%" }}>
-                <div style={{ background: "var(--text-muted)", bottom: `${bottom}%`, left: "50%", position: "absolute", top: `${top}%`, width: 2 }} />
-                <div style={{ background: rising ? "var(--green)" : "var(--coral)", borderRadius: 3, bottom: `${bodyBottom}%`, left: "25%", position: "absolute", right: "25%", top: `${100 - bodyTop}%` }} />
-              </div>
-              <span className="muted" style={{ fontSize: 11 }}>{c.label}</span>
+      <strong>月度互动走势</strong>
+      <div style={{ display: "grid", gap: 10 }}>
+        {rows.map((row) => (
+          <div key={row.month} style={{ display: "grid", gap: 5 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+              <span>{row.label}</span>
+              <span className="muted">{row.total} 条</span>
             </div>
-          );
-        })}
+            <div style={{ background: "var(--bg-tertiary)", borderRadius: 999, display: "flex", height: 10, overflow: "hidden" }}>
+              <div title="A" style={{ background: "var(--coral)", width: `${(row.p1_count / maxTotal) * 100}%` }} />
+              <div title="B" style={{ background: "var(--blue)", width: `${(row.p2_count / maxTotal) * 100}%` }} />
+            </div>
+            <div className="muted" style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+              <span>A {row.p1_count}</span>
+              <span>B {row.p2_count}</span>
+            </div>
+          </div>
+        ))}
       </div>
-      <p className="muted" style={{ margin: 0 }}>K 线由月度互动量与双方平衡度机械生成，用来观察走势，不做现实关系判断。</p>
+      <p className="muted" style={{ margin: 0 }}>这里只展示可数的月度互动量和双方发言差异，用来观察聊天变化。</p>
     </div>
   );
 }
@@ -500,7 +488,7 @@ function PredictionsView({ report }: { report: ReportPayload }) {
       <SectionBlock kicker="信号" title="AI 参考的聊天信号">
         <MetricGrid items={[
           ["活跃天数", stats.chat_dna?.active_days ?? "—", "判断趋势是否稳定"],
-          ["峰值时段", stats.chat_dna ? `${stats.chat_dna.top_hour}:00` : "—", "判断下一次热聊大概率出现的时间"],
+          ["峰值时段", stats.chat_dna ? `${stats.chat_dna.top_hour}:00` : "—", "观察热聊更常出现的时间"],
           ["共同暗号", stats.word_commonality.slice(0, 3).map((item) => item.word).join("、") || "暂无", "判断还能继续复用的梗"],
           ["主动破冰", stats.initiative_scores[0]?.name || "暂无", "判断谁更可能开启下一轮聊天"],
           ["情绪底色", stats.sentiment_overview?.label || "暂无", "判断预测的语气和温度"],
@@ -512,7 +500,7 @@ function PredictionsView({ report }: { report: ReportPayload }) {
 }
 
 function renderView(view: InsightView, report: ReportPayload) {
-  if (view === "annual") return <AnnualView report={report} />;
+  if (view === "summary") return <SummaryView report={report} />;
   if (view === "time") return <TimeView report={report} />;
   if (view === "language") return <LanguageView report={report} />;
   if (view === "emoji") return <EmojiView report={report} />;
@@ -522,7 +510,7 @@ function renderView(view: InsightView, report: ReportPayload) {
   if (view === "relationship") return <RelationshipView report={report} />;
   if (view === "quotes") return <QuotesView report={report} />;
   if (view === "predictions") return <PredictionsView report={report} />;
-  return <AnnualView report={report} />;
+  return <SummaryView report={report} />;
 }
 
 export function InsightsPage() {
@@ -567,7 +555,7 @@ export function InsightsPage() {
     return (
       <main className="page state-page">
         <Loader2 className="spin" />
-        <p>年度分镜加载中...</p>
+        <p>聊天分镜加载中...</p>
       </main>
     );
   }

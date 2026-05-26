@@ -128,14 +128,14 @@ After analysis, the frontend enters the first theme page directly and advances t
 
 | Theme page | Reference basis | Integrated capability |
 |------------|-----------------|-----------------------|
-| 年度总览 | `AnnualReport`, `WeFlow`, `welink` | Wrapped-style total messages, active days, peak moments, streaks, chat DNA |
+| 聊天总览 | `AnnualReport`, `WeFlow`, `welink` | Time-range total messages, active days, peak moments, streaks, chat DNA |
 | 时间与作息 | `whatsapp-wrapped-v3`, `welink` | Hourly/weekday heatmap, chronotypes, late-night ratio, clock fingerprints |
 | 语言与梗 | `WechatVisualization`, `ChatLab` | Word cloud, word specificity/commonality, n-gram phrases, keyword search style insights |
 | 表情包档案 | `WechatVisualization`, `WeFlow` | Emoji ranking, owner labels, specificity/commonality, time distribution, English-to-Chinese WeChat sticker alias merge such as `[Facepalm]` → `[捂脸]` |
-| 互动网络 | `chat-analytics`, `ChatLab`, `welink` | Reply matrix, directed edges, initiative score, @ mentions, link sharing |
+| 互动网络 | `chat-analytics`, `ChatLab`, `welink` | Reply matrix, directed edges, topic starts, @ mentions, link sharing |
 | 情绪温度 | `chat-analytics` | Sentiment overview, monthly sentiment, per-contact emotion profile |
 | 消息结构 | `echotrace`, `WechatExporter` | Message type breakdown and evolution for text, image, emoji, file, link, recall, red packet |
-| 关系 K 线 | `relationship-candlestick-lab`, `WeFlow DualReport` | Relationship index style trend, monthly balance, milestones, first-chat replay |
+| 关系走势 | `relationship-candlestick-lab`, `WeFlow DualReport` | Monthly interaction trend, balance by message counts, milestones, first-chat replay |
 | 名场面回放 | `ChatLab`, `whatsapp-wrapped-v3` | Real quote extraction, memorable moments, first conversation replay |
 | 赛博占卜 | `PromptFill`, existing LLM pipeline | Pattern-based predictions, personality badges, LLM-generated short interpretation on every theme page |
 
@@ -159,7 +159,7 @@ After analysis, the frontend enters the first theme page directly and advances t
 | Frontend | React 19, TypeScript, Vite 6 |
 | Backend | Python 3.12, FastAPI, Pydantic v2 |
 | Database | SQLite (WAL mode) |
-| AI/LLM | DeepSeek (primary), OpenAI (fallback), OpenAI-compatible |
+| AI/LLM | DeepSeek, Qwen, OpenAI, OpenAI-compatible APIs, optional fallback provider |
 | NLP | jieba (Chinese tokenization) |
 | Charts | Recharts + custom SVG/CSS |
 | Export | JSON, CSV, TXT, HTML |

@@ -20,7 +20,7 @@ export function LandingPage() {
           <h1>上传聊天记录，生成全群都想转发的赛博体检报告。</h1>
           <p>
             支持 WeFlow JSON 格式。45+ 个统计维度，
-            多段 LLM 分析、AI 锐评、个性勋章、赛博占卜和年度分镜。
+            多段 LLM 分析、AI 锐评、个性勋章、赛博占卜和聊天分镜。
           </p>
           <div className="hero-actions">
             <Link className="btn btn-primary" to="/upload">
@@ -53,7 +53,7 @@ export function LandingPage() {
         <article>
           <span className="feature-icon">📊</span>
           <h2>45 维分析</h2>
-          <p>热力图、词云、雷达图、情绪检测、作息鉴定、人格勋章。</p>
+          <p>热力图、词云、互动图谱、情绪检测、作息鉴定、人格勋章。</p>
         </article>
         <article>
           <span className="feature-icon">🤖</span>

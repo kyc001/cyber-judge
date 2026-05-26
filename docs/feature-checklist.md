@@ -56,8 +56,8 @@ Status: [x] Done  [-] Removed  [ ] Planned
 
 ### B6. Interaction / Relationship
 - [x] B6.1 Directed interaction edges (who → whom)
-- [x] B6.2 Relationship metric cards (CP score, initiative, reply stability, tsundere)
-- [x] B6.3 Initiative scores (who breaks silence first)
+- [x] B6.2 Relationship signal cards (two-way interaction, initiative, reply stability, care expression)
+- [x] B6.3 Topic-start counts (who breaks silence first)
 - [x] B6.4 Interaction matrix (per-pair reply counts)
 - [x] B6.5 @mention stats (who gets @'d most)
 - [x] B6.6 Send/receive ratio per person
@@ -110,7 +110,7 @@ Status: [x] Done  [-] Removed  [ ] Planned
 
 ## G. AI Predictions
 
-- [x] G1. Prediction cards (title + body + probability: 高/中/低)
+- [x] G1. Prediction cards (title + body)
 - [x] G2. Group predictions (dragon king, topics, new memes)
 - [x] G3. Relationship predictions (trends, milestones)
 - [x] G4. LLM-generated prediction content (separate sub-call)
@@ -129,8 +129,8 @@ Status: [x] Done  [-] Removed  [ ] Planned
 
 - [x] I1. Relationship summary
 - [x] I2. Who's more proactive
-- [x] I3. CP score
-- [x] I4. Relationship radar (默契/主动/嘴硬/安全/暧昧/陪伴)
+- [x] I3. Two-way interaction summary
+- [x] I4. Relationship feature tags (共同语言/主动/稳定/陪伴等)
 - [x] I5. Tsundere detection (嘴硬关心 pattern)
 - [x] I6. Shared vocabulary
 - [x] I7. First chat + first 10 messages
@@ -169,7 +169,7 @@ Status: [x] Done  [-] Removed  [ ] Planned
 - [x] K5. Emoji board (grid with owner labels)
 - [x] K6. Timeline (vertical event list)
 - [x] K7. Relationship directed graph
-- [x] K8. Relationship scoreboard
+- [x] K8. Relationship signal cards
 - [x] K9. Word specificity chart (per-person cards + bars)
 - [x] K10. Word commonality chart (shared word list)
 - [x] K11. Message type bar chart

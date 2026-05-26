@@ -186,7 +186,7 @@ export function UploadPage() {
             >
               <HeartHandshake size={20} />
               <strong>双人关系</strong>
-              <span>主动程度、默契雷达、关系金句</span>
+              <span>主动程度、共同语言、关系金句</span>
             </button>
           </div>
 

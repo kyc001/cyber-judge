@@ -71,7 +71,7 @@ These fields are produced by WeFlow and MUST be present in each message object:
 | `localType` | integer | WeFlow | WeFlow message type code (see §2.3) |
 | `content` | string or null | WeFlow | Message body text (null for images/video) |
 | `senderDisplayName` | string | WeFlow | Human-readable sender nickname |
-| `senderUsername` | string | WeFlow | WeChat username/chatroom ID (fallback ID) |
+| `senderUsername` | string | WeFlow | WeChat username/chatroom ID (secondary ID) |
 
 ### 2.3 WeFlow localType → Message Type Mapping
 

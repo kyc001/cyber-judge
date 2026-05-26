@@ -1,76 +1,88 @@
-# cyber-judge
+# Cyber Judge / 赛博判官
 
-赛博判官项目的 4 号前端 MVP。当前实现支持两条 mock 流程：
+赛博判官读取 WeFlow 导出的微信聊天 JSON，先生成按顺序播放的聊天分镜，再进入最终 AI 报告页。当前输入只支持 WeFlow JSON。
 
-- 群聊锐评报告：龙王榜、群人设、词云、热力图、元宝语录。
-- 双人关系锐评报告：关系定性、主动程度、关系分数、关系金句、时间轴。
+## 功能
 
-默认使用 mock 数据运行，不依赖后端、解析器或 LLM 服务，方便 2/3/5 号接口还没完成时先联调页面。
+- 上传聊天 JSON，预览成员、消息类型、时间范围和样例消息
+- 支持群聊锐评和双人关系两种报告类型
+- 可选择匿名化昵称
+- 分析页展示解析、统计和 LLM 生成进度
+- 聊天分镜按固定顺序展示：聊天总览、时间与作息、语言与梗、表情包档案、互动网络、情绪温度、消息结构、关系走势、名场面回放、赛博占卜
+- 表情包档案会读取 WeFlow 的 `emojiCdnUrl` 和 `emojiMd5`，支持 GIF、PNG、WebP、JPG 等真实表情包资源，并合并微信中英文别名避免重复展示
+- 最终报告支持分享链接、JSON 导出和 HTML 导出
 
-前端工程已集中放在 `frontend/` 目录，根目录只保留项目说明、计划文档、团队文档和 Trellis/agent 配置。
+## 运行
 
-## 技术栈
+首次安装：
 
-- Vite
-- React
-- TypeScript
-- CSS 设计变量
-- mock 优先的 API 适配层
+```powershell
+npm run setup
+```
 
-## 本地运行
+启动开发环境：
 
-```bash
-cd frontend
-npm install
+```powershell
 npm run dev
 ```
 
-启动后访问：
+访问：
 
 ```text
-http://localhost:5173/
+http://127.0.0.1:5173/
 ```
 
-## 常用页面
+`npm run dev` 会由 Vite 自动启动 `backend/main.py`，前端 API 通过代理访问 `http://127.0.0.1:8000`。
 
-- `/`：落地页
-- `/upload`：上传 / 粘贴聊天记录
-- `/upload?type=relationship`：直接进入双人关系模式
-- `/analyzing`：分析中页面
-- `/report/demo-report-001`：群聊 Demo 报告
-- `/report/demo-relationship-001`：双人关系 Demo 报告
-- `/share/demo-longwang`：群聊分享页
-- `/share/demo-relationship`：双人关系分享页
+## LLM 配置
 
-## 关键文件
+复制环境变量模板：
 
-- `frontend/src/api/client.ts`：前端唯一 API 入口，后续从 mock 切真实后端主要改这里。
-- `frontend/src/contracts/report.ts`：前端、解析器、后端、LLM 共用的数据类型。
-- `frontend/src/mock/report.ts`：群聊和双人关系的 mock 报告数据。
-- `frontend/src/utils/parser.ts`：临时文本解析器，后续可由 2 号替换。
-- `frontend/src/components/report/`：报告图表、金句卡片、分享卡片。
-- `docs/contracts/frontend-api.md`：接口契约文档。
-- `docs/handover/frontend-handover.md`：前端交接说明。
+```powershell
+copy backend\.env.example backend\.env
+```
 
-## 验证命令
+需要配置：
 
-```bash
-cd frontend
+- `LLM_PROVIDER`
+- `LLM_API_KEY`
+- `LLM_API_BASE`
+- `LLM_MODEL`
+- `LLM_FALLBACK_PROVIDER`、`LLM_FALLBACK_API_KEY`、`LLM_FALLBACK_API_BASE`、`LLM_FALLBACK_MODEL`（可选）
+- `LLM_TIMEOUT_SECONDS`
+- `LLM_MAX_RETRIES`
+- `DATABASE_PATH`
+
+## 页面
+
+- `/`：首页
+- `/upload`：上传与预览
+- `/analyzing?reportId=...`：分析进度
+- `/insights/:id/summary`：聊天分镜起点
+- `/insights/:id/:view`：指定分镜页
+- `/report/:id`：最终报告
+- `/share/:slug`：分享页
+
+## API
+
+- `POST /api/upload`
+- `GET /api/report/:id`
+- `GET /api/report/:id/progress`
+- `POST /api/share/:id`
+- `GET /api/share/:slug`
+- `POST /api/export`
+- `GET /api/health`
+
+## 目录
+
+- `backend/`：FastAPI、解析、统计、LLM、导出
+- `frontend/`：React 页面、图表组件和 API client
+- `docs/`：架构、功能清单和交接文档
+- `references/`：参考项目
+- `example/`、`texts/`：测试数据
+
+## 检查
+
+```powershell
 npm run build
 ```
-
-当前构建会出现一个 chunk 体积警告，这是 `html2canvas` 等前端库导致的，不影响 MVP 运行。后续上线前可以再做按路由拆包。
-
-## 接口与交接
-
-- 接口契约见：[docs/contracts/frontend-api.md](docs/contracts/frontend-api.md)
-- 前端交接见：[docs/handover/frontend-handover.md](docs/handover/frontend-handover.md)
-
-## 提交建议
-
-仓库已通过 `.gitignore` 忽略本地依赖、构建产物、日志、环境变量，以及 Trellis / agent 相关本地工作流文件。团队提交时主要关注：
-
-- `frontend/`
-- `docs/`
-- `README.md`
-- `plan.md`

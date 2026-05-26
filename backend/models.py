@@ -394,6 +394,7 @@ class EmojiSpecificityItem(BaseModel):
     sender: str
     count: int
     specificity: float
+    url: Optional[str] = None
 
 class InteractionMatrixItem(BaseModel):
     from_: str = Field(alias="from")

@@ -97,36 +97,15 @@ export function KeywordCloud({ keywords }: { keywords: KeywordStat[] }) {
 }
 
 export function RadarChart({ metrics }: { metrics: RadarMetric[] }) {
-  const center = 120; const radius = 92;
-  const points = metrics.map((item, index) => {
-    const angle = (Math.PI * 2 * index) / metrics.length - Math.PI / 2;
-    const scaled = radius * clamp(item.value / 100, 0, 1);
-    return {
-      x: center + Math.cos(angle) * scaled, y: center + Math.sin(angle) * scaled,
-      labelX: center + Math.cos(angle) * (radius + 24), labelY: center + Math.sin(angle) * (radius + 24),
-      label: item.label, value: item.value,
-    };
-  });
+  if (metrics.length === 0) return <p className="muted">暂无特征数据。</p>;
   return (
-    <div className="radar-wrap">
-      <svg viewBox="0 0 240 240" role="img" aria-label="人格雷达图">
-        {[0.25, 0.5, 0.75, 1].map((scale) => (
-          <circle cx={center} cy={center} fill="none" key={scale} r={radius * scale}
-            stroke="rgba(32, 32, 32, 0.12)" />
-        ))}
-        {points.map((point) => (
-          <line key={point.label} stroke="rgba(32, 32, 32, 0.12)"
-            x1={center} x2={point.labelX} y1={center} y2={point.labelY} />
-        ))}
-        <polygon fill="rgba(25, 132, 196, 0.22)" points={points.map(p => `${p.x},${p.y}`).join(" ")}
-          stroke="#1984c4" strokeWidth="3" />
-        {points.map((point) => (
-          <g key={point.label}>
-            <circle cx={point.x} cy={point.y} fill="#f26b5e" r="4" />
-            <text x={point.labelX} y={point.labelY} textAnchor="middle">{point.label}</text>
-          </g>
-        ))}
-      </svg>
+    <div style={panelGridStyle}>
+      {metrics.map((metric) => (
+        <div key={metric.label} style={panelCardStyle}>
+          <strong>{metric.label}</strong>
+          <p className="muted" style={{ margin: "0.45rem 0 0" }}>聊天记录里有对应行为信号。</p>
+        </div>
+      ))}
     </div>
   );
 }
@@ -173,7 +152,7 @@ function stickerLabelToEmoji(label: string): string {
     "[破涕为笑]": "[Joyful]","[奸笑]": "[Smirk]",  "[旺柴]": "[Doge]",
     "[无语]": "[Speechless]","[捂脸]": "[Facepalm]","[合十]": "[Worship]",
     "[吃瓜]": "[Onlooker]","[加油]": "[GoForIt]",  "[汗]": "[Sweat]",
-    "[天啊]": "[OMG]",     "[好的]": "[OK]",       "[打脸]": "[Facepalm]",
+    "[天啊]": "[OMG]",     "[好的]": "[OK]",       "[打脸]": "[MyBad]",
     "[哇]": "[Wow]",       "[红包]": "[Packet]",
   };
   const normalized = normalize[key] || key;
@@ -195,7 +174,7 @@ function stickerLabelToEmoji(label: string): string {
     "[Joyful]": "😂",     "[Kiss]": "😘",        "[Laugh]": "😆",
     "[Lightning]": "⚡",  "[Lips]": "💋",        "[Lol]": "😆",
     "[Love]": "😍",       "[Luck]": "🤞",        "[Moon]": "🌙",
-    "[NosePick]": "🫣",   "[OK]": "👌",          "[OMG]": "😱",
+    "[MyBad]": "🤕",      "[NosePick]": "🫣",   "[OK]": "👌",          "[OMG]": "😱",
     "[Onlooker]": "🍉",   "[Packet]": "🧧",      "[Panic]": "😱",
     "[Party]": "🎉",      "[Peace]": "✌️",       "[Pig]": "🐷",
     "[Pooh-pooh]": "😒", "[Poop]": "💩",        "[Puke]": "🤮",
@@ -226,36 +205,96 @@ function renderStickerLabel(label: string): string {
   return label;
 }
 
+const NON_EMOJI_LABELS = new Set([
+  "[图片]", "[视频]", "[语音]", "[文件]", "[链接]", "[聊天记录]", "[名片]", "[消息]",
+  "[表情]", "[表情包]", "[动画表情]",
+]);
+
+function isDisplayableSticker(label: string, url?: string | null): boolean {
+  return Boolean(url) || !NON_EMOJI_LABELS.has(label);
+}
+
+function stickerVisualKey(label: string, url?: string | null): string {
+  const trimmedUrl = url?.trim();
+  if (trimmedUrl) return `url:${trimmedUrl}`;
+  return `text:${renderStickerLabel(label)}`;
+}
+
+function buildStickerUrlMaps(catalog: EmojiStat[]) {
+  const byLabel = new Map<string, string>();
+  const byDisplay = new Map<string, string>();
+  for (const item of catalog) {
+    if (!item.url) continue;
+    byLabel.set(item.label, item.url);
+    byDisplay.set(renderStickerLabel(item.label), item.url);
+  }
+  return { byDisplay, byLabel };
+}
+
+function resolveStickerUrl(
+  label: string,
+  url: string | null | undefined,
+  maps?: ReturnType<typeof buildStickerUrlMaps>,
+): string | null {
+  if (url) return url;
+  if (!maps) return null;
+  return maps.byLabel.get(label) || maps.byDisplay.get(renderStickerLabel(label)) || null;
+}
+
+function StickerVisual({
+  label,
+  textClassName = "emoji-label-text",
+  url,
+  size = 64,
+}: {
+  label: string;
+  textClassName?: string;
+  url?: string | null;
+  size?: number;
+}) {
+  if (url) {
+    const sizeStyle = { height: size, width: size };
+    return (
+      <span className="emoji-sticker-wrap" style={sizeStyle}>
+        <img
+          className="emoji-sticker-img"
+          src={url}
+          alt={renderStickerLabel(label) || "表情包"}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          style={sizeStyle}
+        />
+      </span>
+    );
+  }
+  return <span className={textClassName}>{renderStickerLabel(label)}</span>;
+}
+
 export function EmojiBoard({ emojis }: { emojis: EmojiStat[] }) {
   if (!emojis || emojis.length === 0) {
     return <p className="muted">暂无表情包数据。</p>;
   }
+  const merged = Array.from(emojis.filter((item) => isDisplayableSticker(item.label, item.url)).reduce((map, item) => {
+    const key = stickerVisualKey(item.label, item.url);
+    const current = map.get(key);
+    if (current) {
+      current.value += item.value;
+      current.owner ||= item.owner;
+      current.url ||= item.url;
+    } else {
+      map.set(key, { ...item });
+    }
+    return map;
+  }, new Map<string, EmojiStat>()).values()).sort((a, b) => b.value - a.value);
+  if (merged.length === 0) {
+    return <p className="muted">暂无表情包数据。</p>;
+  }
   return (
     <div className="emoji-board">
-      {emojis.map((item, index) => (
-        <div className="emoji-tile" key={item.label}>
+      {merged.map((item, index) => (
+        <div className="emoji-tile" key={stickerVisualKey(item.label, item.url)}>
           <span className="emoji-rank">#{index + 1}</span>
-          {item.url ? (
-            <div className="emoji-sticker-wrap">
-              <img
-                className="emoji-sticker-img"
-                src={item.url}
-                alt={item.label}
-                loading="lazy"
-                onError={(e) => {
-                  const el = e.target as HTMLImageElement;
-                  el.style.display = "none";
-                  const fallback = el.nextElementSibling as HTMLElement | null;
-                  if (fallback) fallback.style.display = "flex";
-                }}
-              />
-              <span className="emoji-sticker-fallback" style={{ display: "none" }}>
-                {renderStickerLabel(item.label)}
-              </span>
-            </div>
-          ) : (
-            <span className="emoji-label-text">{renderStickerLabel(item.label)}</span>
-          )}
+          <StickerVisual label={item.label} url={item.url} />
           <p>{formatCount(item.value)} 次</p>
         </div>
       ))}
@@ -299,8 +338,6 @@ export function RelationshipScoreboard({ metrics }: { metrics: RelationshipMetri
       {metrics.map((metric) => (
         <article className="relationship-score" key={metric.label}>
           <span>{metric.label}</span>
-          <strong>{metric.value}</strong>
-          <div className="score-track"><div style={{ width: `${clamp(metric.value, 0, 100)}%` }} /></div>
           <p>{metric.caption}</p>
         </article>
       ))}
@@ -647,12 +684,28 @@ export function MonthlySentimentTrend({ data }: { data: MonthlySentimentItem[] }
 
 // ── EXTRA: Emoji Specificity ────────────────────────────────────
 
-export function EmojiSpecificityChart({ items }: { items: EmojiSpecificityItem[] }) {
+export function EmojiSpecificityChart({ catalog = [], items }: { catalog?: EmojiStat[]; items: EmojiSpecificityItem[] }) {
   if (items.length === 0) return <p className="muted">暂无表情特异性数据。</p>;
+  const urlMaps = buildStickerUrlMaps(catalog);
   const bySender: Record<string, EmojiSpecificityItem[]> = {};
   for (const item of items) {
-    if (!bySender[item.sender]) bySender[item.sender] = [];
-    if (bySender[item.sender].length < 5) bySender[item.sender].push(item);
+    const url = resolveStickerUrl(item.emoji, item.url, urlMaps);
+    if (!isDisplayableSticker(item.emoji, url)) continue;
+    const key = stickerVisualKey(item.emoji, url);
+    const senderItems = bySender[item.sender] || [];
+    const current = senderItems.find((entry) =>
+      stickerVisualKey(entry.emoji, resolveStickerUrl(entry.emoji, entry.url, urlMaps)) === key
+    );
+    if (current) {
+      current.count += item.count;
+      current.url ||= url;
+      if (Math.abs(item.specificity) > Math.abs(current.specificity)) {
+        current.specificity = item.specificity;
+      }
+    } else {
+      senderItems.push({ ...item, url });
+      bySender[item.sender] = senderItems;
+    }
   }
   return (
     <div className="emoji-specificity-grid">
@@ -660,11 +713,17 @@ export function EmojiSpecificityChart({ items }: { items: EmojiSpecificityItem[]
         <div className="emoji-spec-card" key={sender}>
           <h4>{sender} 的标志性表情</h4>
           <div className="emoji-spec-list">
-            {emojis.map(e => (
-              <span key={e.emoji} className="emoji-spec-item" title={`${e.count}次, 特异性${e.specificity}`}>
-                {renderStickerLabel(e.emoji)} <small>×{e.count}</small>
-              </span>
-            ))}
+            {emojis
+              .sort((a, b) => Math.abs(b.specificity) - Math.abs(a.specificity) || b.count - a.count)
+              .slice(0, 5)
+              .map(e => {
+                const url = resolveStickerUrl(e.emoji, e.url, urlMaps);
+                return (
+                  <span key={`${e.emoji}-${url || ""}`} className="emoji-spec-item" title={`${e.count}次, 特异性${e.specificity}`}>
+                    <StickerVisual label={e.emoji} url={url} size={28} textClassName="" /> <small>×{e.count}</small>
+                  </span>
+                );
+              })}
           </div>
         </div>
       ))}
@@ -769,7 +828,7 @@ export function DualReportExtrasCard({ extras }: { extras: DualReportExtras }) {
 
 export function AnnualSummaryCard({ annual }: { annual?: AnnualSummary }) {
   if (!annual || !annual.total_messages) {
-    return <p className="muted">年度画像数据不足。</p>;
+    return <p className="muted">聊天概览数据不足。</p>;
   }
   const metrics = [
     ["总消息", formatCount(annual.total_messages)],
@@ -791,7 +850,7 @@ export function AnnualSummaryCard({ annual }: { annual?: AnnualSummary }) {
         ))}
       </div>
       <div style={panelCardStyle}>
-        <strong>年度主角</strong>
+        <strong>高频成员</strong>
         <p className="muted" style={{ margin: "0.45rem 0 0" }}>
           {annual.top_friends.length > 0 ? annual.top_friends.join("、") : "暂无稳定高频联系人"}
         </p>
@@ -871,7 +930,7 @@ export function TimeProfilePanel({
           </div>
         </div>
         <div style={panelCardStyle}>
-          <strong>年度月份分布</strong>
+          <strong>月份分布</strong>
           <div style={{ alignItems: "end", display: "flex", gap: 4, height: 132, marginTop: 12 }}>
             {yearly.map((m) => (
               <div key={m.month} title={`${m.label} · ${m.count}条`} style={{ alignItems: "center", display: "flex", flex: 1, flexDirection: "column", gap: 4, height: "100%", justifyContent: "end" }}>
@@ -947,7 +1006,7 @@ export function InteractionMatrixPanel({
 }
 
 export function FamousQuotesPanel({ quotes }: { quotes: FamousQuote[] }) {
-  if (quotes.length === 0) return <p className="muted">暂无高分原话候选。</p>;
+  if (quotes.length === 0) return <p className="muted">暂无原话候选。</p>;
   return (
     <div style={panelGridStyle}>
       {quotes.slice(0, 6).map((quote) => (
@@ -956,7 +1015,7 @@ export function FamousQuotesPanel({ quotes }: { quotes: FamousQuote[] }) {
           <blockquote style={{ fontWeight: 800, lineHeight: 1.55, margin: "0.65rem 0" }}>
             「{quote.content}」
           </blockquote>
-          <span className="muted">记忆点分数 {quote.score}</span>
+          <span className="muted">来自真实聊天记录</span>
         </article>
       ))}
     </div>
@@ -968,18 +1027,35 @@ export function EmojiCommonalityPanel({
   items,
 }: {
   byHour: { hour: number; count: number; pct: number }[];
-  items: { emoji: string; count_a: number; count_b: number; commonality: number }[];
+  items: { emoji: string; count_a: number; count_b: number; commonality: number; url?: string | null }[];
 }) {
   if (items.length === 0 && byHour.every((item) => item.count === 0)) return null;
   const maxHour = Math.max(1, ...byHour.map((h) => h.count));
+  const mergedItems = Array.from(items.reduce((map, item) => {
+    if (!isDisplayableSticker(item.emoji, item.url)) return map;
+    const key = stickerVisualKey(item.emoji, item.url);
+    const current = map.get(key);
+    if (current) {
+      current.count_a += item.count_a;
+      current.count_b += item.count_b;
+      current.url ||= item.url;
+      current.commonality = current.count_a > 0 && current.count_b > 0
+        ? Math.round((2 / (1 / current.count_a + 1 / current.count_b)) * 100) / 100
+        : Math.max(current.commonality, item.commonality);
+    } else {
+      map.set(key, { ...item });
+    }
+    return map;
+  }, new Map<string, { emoji: string; count_a: number; count_b: number; commonality: number; url?: string | null }>()).values())
+    .sort((a, b) => b.commonality - a.commonality);
   return (
     <div className="v2-stack">
-      {items.length > 0 && (
+      {mergedItems.length > 0 && (
         <div style={{ ...panelCardStyle, display: "grid", gap: "0.55rem" }}>
           <strong>共同表情暗号</strong>
-          {items.slice(0, 8).map((item) => (
-            <div key={item.emoji} style={compactRowStyle}>
-              <span>{renderStickerLabel(item.emoji)}</span>
+          {mergedItems.slice(0, 8).map((item) => (
+            <div key={stickerVisualKey(item.emoji, item.url)} style={compactRowStyle}>
+              <StickerVisual label={item.emoji} url={item.url} size={28} textClassName="" />
               <span className="muted">A {item.count_a} / B {item.count_b} · 共性 {item.commonality}</span>
             </div>
           ))}
@@ -998,6 +1074,36 @@ export function EmojiCommonalityPanel({
         </div>
       )}
     </div>
+  );
+}
+
+export function EmojiInlineList({
+  items,
+}: {
+  items: { emoji: string; count: number; url?: string | null }[];
+}) {
+  const merged = Array.from(items.reduce((map, item) => {
+    if (!isDisplayableSticker(item.emoji, item.url)) return map;
+    const key = stickerVisualKey(item.emoji, item.url);
+    const current = map.get(key);
+    if (current) {
+      current.count += item.count;
+      current.url ||= item.url;
+    } else {
+      map.set(key, { ...item });
+    }
+    return map;
+  }, new Map<string, { emoji: string; count: number; url?: string | null }>()).values());
+  if (!merged.length) return <>暂无</>;
+  return (
+    <span style={{ alignItems: "center", display: "inline-flex", flexWrap: "wrap", gap: "0.45rem" }}>
+      {merged.map((item) => (
+        <span key={stickerVisualKey(item.emoji, item.url)} style={{ alignItems: "center", display: "inline-flex", gap: "0.2rem" }}>
+          <StickerVisual label={item.emoji} url={item.url} size={28} textClassName="" />
+          <small>×{item.count}</small>
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -1051,16 +1157,12 @@ export function MessageTypeEvolutionPanel({
 
 export function PredictionsCard({ predictions }: { predictions: Prediction[] }) {
   if (predictions.length === 0) return <p className="muted">暂无预测数据。</p>;
-  const probColors: Record<string, string> = { "高": "#f26b5e", "中": "#f9a825", "低": "#4caf50" };
   return (
     <div className="predictions-list">
       {predictions.map((p) => (
         <div className="prediction-card" key={p.id}>
           <div className="prediction-header">
             <strong>{p.title}</strong>
-            <span className="prediction-prob" style={{ background: probColors[p.probability] || '#999' }}>
-              {p.probability}概率
-            </span>
           </div>
           <p>{p.body}</p>
         </div>

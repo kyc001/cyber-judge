@@ -16,6 +16,7 @@ Integrated capabilities:
 from __future__ import annotations
 
 import re
+import hashlib
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
@@ -155,9 +156,37 @@ def _normalize_emoji_label(label: str) -> str:
     canonical = _EMOJI_CN_ALIASES.get(inner) or _EMOJI_ENG_TO_CN.get(inner) or inner
     return f"[{canonical}]"
 
+_GENERIC_EMOJI_CAPTIONS = {
+    "", "表情", "表情包", "动画表情", "[表情]", "[表情包]", "[动画表情]",
+}
+
+def _emoji_label_from_meta(caption: object, url: object = "", md5: object = "") -> str:
+    raw = str(caption or "").strip()
+    if raw and raw not in _GENERIC_EMOJI_CAPTIONS and not raw.startswith("表情_"):
+        return _normalize_emoji_label(raw)
+
+    md5_text = str(md5 or "").strip()
+    if md5_text:
+        return f"[表情包:{md5_text[:12]}]"
+
+    url_text = str(url or "").strip()
+    if url_text:
+        digest = hashlib.sha1(url_text.encode("utf-8")).hexdigest()[:12]
+        return f"[表情包:{digest}]"
+
+    return ""
+
 def _extract_emojis(content: str) -> list[str]:
     raw = _STICKER_NAME_RE.findall(content)
     return [_normalize_emoji_label(r) for r in raw if r not in _NON_EMOJI_BRACKETS]
+
+def _extract_message_emojis(msg: ChatMessage) -> list[tuple[str, str]]:
+    if msg.type == "emoji":
+        meta = msg.meta or {}
+        url = str(meta.get("url", "") or "")
+        label = _emoji_label_from_meta(meta.get("caption", ""), url, meta.get("md5", ""))
+        return [(label, url)] if label else []
+    return [(label, "") for label in _extract_emojis(msg.content)]
 
 
 def _extract_urls(content: str) -> list[str]:
@@ -393,7 +422,7 @@ def _compute_participants(messages: list[ChatMessage]) -> list[ParticipantStat]:
         st = sender_stats[s]
         st["msg_count"] += 1
         st["char_count"] += len(msg.content)
-        st["emoji_count"] += len(_extract_emojis(msg.content))
+        st["emoji_count"] += len(_extract_message_emojis(msg))
         if msg.type == "image":
             st["image_count"] += 1
         if msg.type == "link" or _URL_RE.search(msg.content):
@@ -512,7 +541,7 @@ def _compute_radar(
         ]
     else:
         return [
-            RadarMetric(label="默契度", value=round(reply_ratio * 1.2)),
+            RadarMetric(label="接话密度", value=round(reply_ratio * 1.2)),
             RadarMetric(label="主动值", value=density),
             RadarMetric(label="嘴硬度", value=round(night_ratio * 0.8)),
             RadarMetric(label="安全感", value=round(reply_ratio * 0.9)),
@@ -527,45 +556,29 @@ def _compute_emojis(messages: list[ChatMessage]) -> list[EmojiStat]:
     emoji_counter: Counter[str] = Counter()
     emoji_owners: dict[str, str] = {}
     emoji_urls: dict[str, str] = {}
-    sender_sticker_counts: Counter[str] = Counter()
-    sender_sticker_urls: dict[str, str] = {}
 
     for msg in messages:
         if msg.type == "emoji":
             caption = (msg.meta or {}).get("caption", "") if msg.meta else ""
-            url = (msg.meta or {}).get("url", "") if msg.meta else ""
-            if caption and not caption.startswith("表情_") and caption != "[表情包]" and caption != "[表情]":
-                caption = _normalize_emoji_label(str(caption))
-                emoji_counter[caption] += 1
-                if caption not in emoji_owners:
-                    emoji_owners[caption] = msg.sender
-                if url and caption not in emoji_urls:
-                    emoji_urls[caption] = url
-            else:
-                sender_sticker_counts[msg.sender] += 1
-                if url and msg.sender not in sender_sticker_urls:
-                    sender_sticker_urls[msg.sender] = url
+            url = str((msg.meta or {}).get("url", "") or "") if msg.meta else ""
+            label = _emoji_label_from_meta(caption, url, (msg.meta or {}).get("md5", "") if msg.meta else "")
+            if label:
+                emoji_counter[label] += 1
+                if label not in emoji_owners:
+                    emoji_owners[label] = msg.sender
+                if url and label not in emoji_urls:
+                    emoji_urls[label] = url
             continue
 
-        for em in _extract_emojis(msg.content):
+        for em, _ in _extract_message_emojis(msg):
             emoji_counter[em] += 1
             if em not in emoji_owners:
                 emoji_owners[em] = msg.sender
 
-    # Build result: named stickers first, then per-sender sticker aggregates
     result: list[EmojiStat] = []
     for em, count in emoji_counter.most_common(12):
         result.append(EmojiStat(label=em, value=count, owner=emoji_owners.get(em),
                                 url=emoji_urls.get(em)))
-
-    # Add per-sender sticker aggregates (those without captions)
-    for sender, count in sender_sticker_counts.most_common(12 - len(result)):
-        result.append(EmojiStat(
-            label=f"{sender} 爱用的表情",
-            value=count,
-            owner=sender,
-            url=sender_sticker_urls.get(sender),
-        ))
 
     return result[:12]
 
@@ -732,19 +745,19 @@ def _compute_relationship_metrics(
                 mutual_replies += 1
 
     total = max(len(messages), 1)
-    cp_score = min(100, round(mutual_replies / total * 500))
+    two_way_signal = min(100, round(mutual_replies / total * 500))
     initiative = min(100, round(p1.message_count / max(p1.message_count + p2.message_count, 1) * 100))
     reply_stability = min(100, round(mutual_replies / total * 300 + 40))
 
     tsundere_patterns = re.compile(r"(随便|不管|别管|不用|算了|没事|懒得|才不|又不是)")
     tsundere_count = sum(1 for m in messages if tsundere_patterns.search(m.content))
-    tsundere_score = min(100, round(tsundere_count / total * 400 + 30))
+    care_expression = min(100, round(tsundere_count / total * 400 + 30))
 
     return [
-        RelationshipMetric(label="CP 感", value=cp_score, caption="有梗但不油，像一对互相熟悉的默认搭子"),
+        RelationshipMetric(label="双向互动", value=two_way_signal, caption="对话里有较多你来我往的接话记录"),
         RelationshipMetric(label="主动开聊", value=initiative, caption=f"{p1.name} 更常发起对话"),
         RelationshipMetric(label="回复稳定", value=reply_stability, caption="不是每条都秒回，但关键时刻不掉线"),
-        RelationshipMetric(label="嘴硬关心", value=tsundere_score, caption="关心含量高，表达方式偏别扭"),
+        RelationshipMetric(label="关心表达", value=care_expression, caption="聊天里出现过一些别扭但有照应感的表达"),
     ]
 
 
@@ -908,7 +921,7 @@ def _compute_chat_dna(
     # Top emoji (simple count)
     emoji_counter: Counter[str] = Counter()
     for m in messages:
-        emoji_counter.update(_extract_emojis(m.content))
+        emoji_counter.update(em for em, _ in _extract_message_emojis(m))
     top_emoji = emoji_counter.most_common(1)[0][0] if emoji_counter else ""
 
     # Top word
@@ -1166,7 +1179,7 @@ def _compute_personality_badges(
             if m.sender != p.name:
                 continue
             pm["total"] += 1
-            pm["emoji_count"] += len(_extract_emojis(m.content))
+            pm["emoji_count"] += len(_extract_message_emojis(m))
             pm["avg_len"] += len(m.content)
             if m.type in ("red_packet", "transfer"):
                 pm["red_packet"] += 1
@@ -1280,11 +1293,11 @@ def _compute_predictions(
     if report_type == "group_roast":
         return [
             Prediction(id="p1", title="下个月龙王预测", body="根据当前活跃度趋势，龙王之位可能易主。", probability="中"),
-            Prediction(id="p2", title="群聊主题演变", body="话题将从工作吐槽转向生活分享，美食类内容将显著增加。", probability="高"),
+            Prediction(id="p2", title="群聊主题演变", body="话题将从工作吐槽转向生活分享，美食类内容将显著增加。", probability="中"),
             Prediction(id="p3", title="新梗预警", body="下一个高频词将来自近期热点事件，预计在两周内爆发。", probability="中"),
         ]
     else:
         return [
-            Prediction(id="p1", title="关系发展趋势", body="默契度持续上升中，预计下个月会有更多深夜长聊。", probability="高"),
-            Prediction(id="p2", title="下一个里程碑", body="按照当前聊天频率，总消息数将在30天内翻倍。", probability="高"),
+            Prediction(id="p1", title="关系发展趋势", body="共同语言持续增加，预计下个月会有更多深夜长聊。", probability="中"),
+            Prediction(id="p2", title="下一个里程碑", body="按照当前聊天频率，总消息数可能在30天内明显增长。", probability="中"),
         ]

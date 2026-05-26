@@ -94,7 +94,7 @@ export interface YearlyMonthBin { month: number; label: string; count: number; p
 export interface StreakInfo { length: number; start: string; end: string; }
 export interface PeakDayInfo { date: string; count: number; top_sender: string; }
 export interface NgramItem { phrase: string; count: number; }
-export interface EmojiSpecificityItem { emoji: string; sender: string; count: number; specificity: number; }
+export interface EmojiSpecificityItem { emoji: string; sender: string; count: number; specificity: number; url?: string | null; }
 export interface InteractionMatrixItem { from: string; to: string; count: number; from_idx: number; to_idx: number; }
 export interface FirstChatInfo { first_date: string; first_sender: string; first_content: string; first_10: { sender: string; content: string; ts: string }[]; }
 export interface MonthlySentimentItem { month: string; label: string; positive_ratio: number; negative_ratio: number; neutral_ratio: number; }
@@ -110,7 +110,7 @@ export interface EnhancedChatDNA { core_friends: string[]; night_king: string; n
 export interface ClockFingerprint { name: string; distribution: { hour: number; count: number; pct: number }[]; peak_hour: number; total_msgs: number; }
 export interface PerContactSentiment { name: string; positive_count: number; negative_count: number; positive_ratio: number; negative_ratio: number; label: string; }
 export interface ExtraBadgeCriteria { badge_id: string; awarded_to: string; value: number; }
-export interface DualReportExtras { p1_exclusive_emojis: { emoji: string; count: number }[]; p2_exclusive_emojis: { emoji: string; count: number }[]; p1_message_count: number; p2_message_count: number; p1_char_count: number; p2_char_count: number; monthly: { month: string; label: string; p1_count: number; p2_count: number }[]; first_year_chat: string; }
+export interface DualReportExtras { p1_exclusive_emojis: { emoji: string; count: number; url?: string | null }[]; p2_exclusive_emojis: { emoji: string; count: number; url?: string | null }[]; p1_message_count: number; p2_message_count: number; p1_char_count: number; p2_char_count: number; monthly: { month: string; label: string; p1_count: number; p2_count: number }[]; first_year_chat: string; }
 
 export interface ReportStats {
   participants: ParticipantStat[];
@@ -146,7 +146,7 @@ export interface ReportStats {
   monthly_sentiment: MonthlySentimentItem[];
   annual_summary?: AnnualSummary;
   // EXTRA v2
-  emoji_commonality: { emoji: string; count_a: number; count_b: number; commonality: number }[];
+  emoji_commonality: { emoji: string; count_a: number; count_b: number; commonality: number; url?: string | null }[];
   emoji_time_distribution: { hour: number; count: number; pct: number }[];
   message_type_evolution: Record<string, any>[];
   red_packet_overview?: RedPacketOverview;

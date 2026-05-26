@@ -55,7 +55,7 @@ function renderChart(report: ReportPayload, section: ReportSection) {
       return (
         <div className="v2-stack">
           <EmojiBoard emojis={s.emojis} />
-          {s.emoji_specificity.length > 0 && <EmojiSpecificityChart items={s.emoji_specificity} />}
+          {s.emoji_specificity.length > 0 && <EmojiSpecificityChart catalog={s.emojis} items={s.emoji_specificity} />}
           <EmojiCommonalityPanel byHour={s.emoji_time_distribution} items={s.emoji_commonality} />
         </div>
       );
@@ -187,8 +187,8 @@ export function ReportRenderer({ report, shareUrl }: ReportRendererProps) {
 
       <section className="quote-gallery">
         <div className="section-copy">
-          <p className="eyebrow">Quote Cards</p>
-          <h2>{report.report_type === "relationship" ? "关系金句" : "元宝语录"}</h2>
+          <p className="eyebrow">名场面</p>
+          <h2>{report.report_type === "relationship" ? "关系金句" : "聊天金句"}</h2>
           <p>{report.report_type === "relationship"
             ? "这组卡片更偏向两个人之间那些说不清但截图后很上头的句子。"
             : "AI 从聊天记录中挖掘的金句，每一句都有故事。"}</p>

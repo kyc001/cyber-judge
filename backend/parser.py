@@ -7,8 +7,33 @@ file, and system message types.
 
 from __future__ import annotations
 
+import html
 import json
+import re
 from models import ChatMessage
+
+_URL_RE = re.compile(r"https?://[^\s\"'<>]+")
+
+
+def _as_text(value: object) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _clean_url(value: str) -> str:
+    return html.unescape(value).rstrip(".,;)")
+
+
+def _direct_url(value: object) -> str:
+    text = _clean_url(_as_text(value))
+    return text if text.startswith(("http://", "https://")) else ""
+
+
+def _extract_first_url(*values: object) -> str:
+    for value in values:
+        match = _URL_RE.search(_as_text(value))
+        if match:
+            return _clean_url(match.group(0))
+    return ""
 
 
 def _detect_message_type(local_type: int) -> str:
@@ -37,11 +62,17 @@ def parse_weflow_json(text: str) -> list[ChatMessage]:
         meta = None
         if local_type == 47:
             sticker_md5 = m.get("emojiMd5", "")
-            sticker_url = m.get("source") or m.get("emojiCdnUrl", "")
-            # Real WeFlow exports don't have emojiCaption; use it if present, else keep generic
+            sticker_url = (
+                _direct_url(m.get("emojiCdnUrl"))
+                or _direct_url(m.get("source"))
+                or _extract_first_url(m.get("content"), m.get("source"))
+            )
+            sticker_local_path = _as_text(m.get("emojiLocalPath"))
             label = m.get("emojiCaption", "") or "[表情包]"
             content = label
             meta = {"url": sticker_url, "caption": label, "md5": sticker_md5}
+            if sticker_local_path:
+                meta["local_path"] = sticker_local_path
 
         messages.append(ChatMessage(
             msg_id=str(m.get("localId", i)),

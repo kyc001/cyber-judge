@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from models import ChatMessage, ParticipantStat
-from stats import _extract_emojis
+from stats import _extract_message_emojis
 
 _STICKER_RE = re.compile(r"\[[一-鿿_a-zA-Z]{2,12}\]")
 URL_RE = re.compile(r"https?://[^\s]+")
@@ -205,9 +205,12 @@ def compute_ngrams(messages: list[ChatMessage], min_len=2, max_len=5, top_n=40) 
 
 def compute_emoji_specificity(messages: list[ChatMessage], participants: list[ParticipantStat]) -> list[dict]:
     person_emojis: dict[str, Counter[str]] = defaultdict(Counter)
+    emoji_urls: dict[str, str] = {}
     for m in messages:
-        for em in _extract_emojis(m.content):
+        for em, url in _extract_message_emojis(m):
             person_emojis[m.sender][em] += 1
+            if url and em not in emoji_urls:
+                emoji_urls[em] = url
     result = []
     for sender in [p.name for p in participants[:5]]:
         if sender not in person_emojis: continue
@@ -219,7 +222,10 @@ def compute_emoji_specificity(messages: list[ChatMessage], participants: list[Pa
             oc = other.get(em, 0)
             total = cnt + oc
             spec = (cnt - oc) / max(total, 1) * max(cnt, oc)
-            result.append({"emoji": em, "sender": sender, "count": cnt, "specificity": round(spec, 3)})
+            item = {"emoji": em, "sender": sender, "count": cnt, "specificity": round(spec, 3)}
+            if em in emoji_urls:
+                item["url"] = emoji_urls[em]
+            result.append(item)
     result.sort(key=lambda x: abs(x["specificity"]), reverse=True)
     return result[:20]
 
@@ -230,8 +236,11 @@ def compute_emoji_commonality(messages: list[ChatMessage], participants: list[Pa
     n1, n2 = participants[0].name, participants[1].name
     ec1: Counter[str] = Counter()
     ec2: Counter[str] = Counter()
+    emoji_urls: dict[str, str] = {}
     for m in messages:
-        for em in _extract_emojis(m.content):
+        for em, url in _extract_message_emojis(m):
+            if url and em not in emoji_urls:
+                emoji_urls[em] = url
             if m.sender == n1: ec1[em] += 1
             elif m.sender == n2: ec2[em] += 1
     shared = set(ec1.keys()) & set(ec2.keys())
@@ -239,8 +248,11 @@ def compute_emoji_commonality(messages: list[ChatMessage], participants: list[Pa
     for em in shared:
         a, b = ec1[em], ec2[em]
         if a > 0 and b > 0:
-            result.append({"emoji": em, "count_a": a, "count_b": b,
-                           "commonality": round(2/(1/a + 1/b), 2)})
+            item = {"emoji": em, "count_a": a, "count_b": b,
+                    "commonality": round(2/(1/a + 1/b), 2)}
+            if em in emoji_urls:
+                item["url"] = emoji_urls[em]
+            result.append(item)
     result.sort(key=lambda x: x["commonality"], reverse=True)
     return result[:15]
 
@@ -249,7 +261,7 @@ def compute_emoji_time_distribution(messages: list[ChatMessage]) -> list[dict]:
     """Emoji usage by hour of day."""
     bins = [0] * 24
     for m, dt in _parse_all(messages):
-        cnt = len(_extract_emojis(m.content))
+        cnt = len(_extract_message_emojis(m))
         if cnt > 0: bins[dt.hour] += cnt
     total = max(sum(bins), 1)
     return [{"hour": h, "count": bins[h], "pct": round(bins[h]/total*100, 1)} for h in range(24)]
@@ -525,7 +537,7 @@ def compute_extra_badge_criteria(messages: list[ChatMessage], participants: list
     emoji_counts = {p.name: 0 for p in participants}
     for m in messages:
         if m.sender in emoji_counts:
-            emoji_counts[m.sender] += len(_extract_emojis(m.content))
+            emoji_counts[m.sender] += len(_extract_message_emojis(m))
     if emoji_counts:
         meme_king = max(emoji_counts.items(), key=lambda x: x[1])
         criteria.append({"badge_id": "meme_master", "awarded_to": meme_king[0], "value": meme_king[1]})
@@ -666,20 +678,35 @@ def compute_dual_report_extras(messages: list[ChatMessage], p1_name: str, p2_nam
     # My/TA exclusive emojis (>= 75% ratio)
     ec1: Counter[str] = Counter()
     ec2: Counter[str] = Counter()
-    for m in p1_msgs: ec1.update(_extract_emojis(m.content))
-    for m in p2_msgs: ec2.update(_extract_emojis(m.content))
+    emoji_urls: dict[str, str] = {}
+    for m in p1_msgs:
+        for em, url in _extract_message_emojis(m):
+            ec1[em] += 1
+            if url and em not in emoji_urls:
+                emoji_urls[em] = url
+    for m in p2_msgs:
+        for em, url in _extract_message_emojis(m):
+            ec2[em] += 1
+            if url and em not in emoji_urls:
+                emoji_urls[em] = url
 
     p1_exclusive_emojis = []
     for em, cnt in ec1.most_common(5):
         c2 = ec2.get(em, 0)
         if cnt >= 3 and (cnt >= c2 * 3 or c2 == 0):
-            p1_exclusive_emojis.append({"emoji": em, "count": cnt})
+            item = {"emoji": em, "count": cnt}
+            if em in emoji_urls:
+                item["url"] = emoji_urls[em]
+            p1_exclusive_emojis.append(item)
 
     p2_exclusive_emojis = []
     for em, cnt in ec2.most_common(5):
         c1 = ec1.get(em, 0)
         if cnt >= 3 and (cnt >= c1 * 3 or c1 == 0):
-            p2_exclusive_emojis.append({"emoji": em, "count": cnt})
+            item = {"emoji": em, "count": cnt}
+            if em in emoji_urls:
+                item["url"] = emoji_urls[em]
+            p2_exclusive_emojis.append(item)
 
     # Monthly message counts
     monthly: dict[str, dict[str, int]] = defaultdict(lambda: {"p1": 0, "p2": 0})

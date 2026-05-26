@@ -188,7 +188,7 @@ interface RelationshipEdge {
 字段用途：
 
 - `relationship_edges`：用于渲染主动方向关系图，例如谁更常开启话题。
-- `relationship_metrics`：用于渲染关系分数卡，例如 CP 感、回复稳定、嘴硬关心。
+- `relationship_metrics`：旧版关系信号卡字段，现已不在界面展示数值。
 
 `relationship_metrics` 可以暂时不传；前端会继续渲染 `relationship_edges`。
 
