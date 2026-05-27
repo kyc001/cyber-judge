@@ -174,6 +174,13 @@ def _estimate_time(msg_count: int) -> int:
     if msg_count < 10000: return 15
     return 25
 
+def _stat_dict(item: object, *, by_alias: bool = False) -> dict:
+    if hasattr(item, "model_dump"):
+        return item.model_dump(by_alias=by_alias)
+    if isinstance(item, dict):
+        return item
+    raise TypeError(f"Unsupported stat item type: {type(item).__name__}")
+
 # ── Report processing ────────────────────────────────────────────
 
 async def _process_report(report_id: str, report_type: str, messages: list) -> None:
@@ -201,8 +208,8 @@ async def _process_report(report_id: str, report_type: str, messages: list) -> N
         hourly_dicts = [h.model_dump() for h in stats.hourly_distribution]
         weekday_dicts = [w.model_dump() for w in stats.weekday_distribution]
         yearly_dicts = [y.model_dump() for y in stats.yearly_monthly]
-        interaction_dicts = [i.model_dump(by_alias=True) for i in stats.interaction_matrix]
-        mentions_dicts = [a.model_dump() for a in stats.at_mention_stats]
+        interaction_dicts = [_stat_dict(i, by_alias=True) for i in stats.interaction_matrix]
+        mentions_dicts = [_stat_dict(a) for a in stats.at_mention_stats]
         famous_quote_dicts = [q for q in stats.famous_quotes[:10]]
         peak_day_dict = stats.peak_day.model_dump() if stats.peak_day else None
         annual_dict = stats.annual_summary.model_dump() if stats.annual_summary else None
