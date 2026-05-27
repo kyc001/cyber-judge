@@ -10,6 +10,21 @@ import type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
+export interface WeFlowSession {
+  id: string;
+  name: string;
+  type: string | number;
+  message_count: number;
+  last_message_at: number | string;
+}
+
+export interface WeFlowStatus {
+  running: boolean;
+  base_url: string;
+  status_code: number;
+  detail: string;
+}
+
 /** Fetch JSON from the API. Throws with Chinese-localized message on network errors. */
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
@@ -60,6 +75,51 @@ export async function uploadRawChat(text: string, reportType: string, anonymized
   return requestJson<AnalyzeResponse>("/api/upload", {
     method: "POST",
     body: JSON.stringify({ text, report_type: reportType, anonymized }),
+  });
+}
+
+/** Check whether WeFlow's local API service is reachable from the backend. */
+export async function getWeFlowStatus(baseUrl: string): Promise<WeFlowStatus> {
+  return requestJson<WeFlowStatus>("/api/weflow/status", {
+    method: "POST",
+    body: JSON.stringify({ base_url: baseUrl }),
+  });
+}
+
+/** Fetch WeFlow sessions through the Cyber Judge backend. */
+export async function getWeFlowSessions(
+  baseUrl: string,
+  accessToken: string,
+  keyword = "",
+): Promise<WeFlowSession[]> {
+  const response = await requestJson<{ sessions: WeFlowSession[] }>("/api/weflow/sessions", {
+    method: "POST",
+    body: JSON.stringify({ base_url: baseUrl, access_token: accessToken, keyword, limit: 100 }),
+  });
+  return response.sessions;
+}
+
+/** Import a selected WeFlow session and start report generation. */
+export async function importWeFlowSession(
+  baseUrl: string,
+  accessToken: string,
+  sessionId: string,
+  reportType: string,
+  anonymized: boolean,
+  startDate?: string,
+  endDate?: string,
+): Promise<AnalyzeResponse> {
+  return requestJson<AnalyzeResponse>("/api/weflow/import", {
+    method: "POST",
+    body: JSON.stringify({
+      base_url: baseUrl,
+      access_token: accessToken,
+      session_id: sessionId,
+      report_type: reportType,
+      anonymized,
+      start_date: startDate || "",
+      end_date: endDate || "",
+    }),
   });
 }
 

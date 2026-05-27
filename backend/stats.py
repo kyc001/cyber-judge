@@ -68,6 +68,12 @@ _NON_EMOJI_BRACKETS = frozenset({
 
 _URL_RE = re.compile(r"https?://[^\s]+")
 _DOMAIN_RE = re.compile(r"https?://([^/\s]+)")
+_WECHAT_ARTIFACT_RE = re.compile(
+    r"^(?:wxid|gh|qkv|v1)_[A-Za-z0-9_-]+$|"
+    r"^(?:template|fromusername|tousername|appmsg|msg|msgid|title|des|url|type|appid|sdkver|"
+    r"thumburl|username|finderusername|objectid|objectnonceid|cdnthumburl|cdnmidimgurl)$",
+    re.IGNORECASE,
+)
 
 # Sentiment word lists (proxy-based, no ML)
 _POSITIVE_WORDS = {
@@ -206,6 +212,8 @@ def _tokenize(text: str) -> list[str]:
         if w in _STOP_WORDS:
             continue
         if w.isdigit():
+            continue
+        if _WECHAT_ARTIFACT_RE.match(w):
             continue
         if re.match(r"^[^\w一-鿿]+$", w):
             continue

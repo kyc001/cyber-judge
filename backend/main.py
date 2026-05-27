@@ -1,4 +1,4 @@
-"""Cyber Judge (赛博判官) API Server.
+﻿"""Cyber Judge (赛博判官) API Server.
 
 Endpoints:
   POST /api/upload          — Upload WeFlow JSON, start analysis
@@ -174,13 +174,6 @@ def _estimate_time(msg_count: int) -> int:
     if msg_count < 10000: return 15
     return 25
 
-def _stat_dict(item: object, *, by_alias: bool = False) -> dict:
-    if hasattr(item, "model_dump"):
-        return item.model_dump(by_alias=by_alias)
-    if isinstance(item, dict):
-        return item
-    raise TypeError(f"Unsupported stat item type: {type(item).__name__}")
-
 # ── Report processing ────────────────────────────────────────────
 
 async def _process_report(report_id: str, report_type: str, messages: list) -> None:
@@ -208,8 +201,8 @@ async def _process_report(report_id: str, report_type: str, messages: list) -> N
         hourly_dicts = [h.model_dump() for h in stats.hourly_distribution]
         weekday_dicts = [w.model_dump() for w in stats.weekday_distribution]
         yearly_dicts = [y.model_dump() for y in stats.yearly_monthly]
-        interaction_dicts = [_stat_dict(i, by_alias=True) for i in stats.interaction_matrix]
-        mentions_dicts = [_stat_dict(a) for a in stats.at_mention_stats]
+        interaction_dicts = [i.model_dump(by_alias=True) for i in stats.interaction_matrix]
+        mentions_dicts = [a.model_dump() for a in stats.at_mention_stats]
         famous_quote_dicts = [q for q in stats.famous_quotes[:10]]
         peak_day_dict = stats.peak_day.model_dump() if stats.peak_day else None
         annual_dict = stats.annual_summary.model_dump() if stats.annual_summary else None
@@ -498,8 +491,69 @@ async def get_share_endpoint(slug: str):
 
 # ── Upload (JSON only) ───────────────────────────────────────────
 
+from chatlab_parser import parse_chatlab_json
 from parser import parse_and_validate
+from weflow_client import (
+    WeFlowClientError,
+    check_weflow_status,
+    fetch_session_messages_chatlab,
+    fetch_session_messages_raw,
+    fetch_sessions,
+)
 import stats_extra
+
+
+def _anonymize_messages(messages: list) -> None:
+    """Replace sender names with stable aliases in-place."""
+
+    senders = list(dict.fromkeys(m.sender for m in messages))
+    alias_map: dict[str, str] = {}
+    for i, sender in enumerate(senders):
+        alias_map[sender] = f"{chr(65 + (i % 26))}同学"
+    for message in messages:
+        message.sender = alias_map.get(message.sender, message.sender)
+
+
+def _parse_date_bound(value: object, end_of_day: bool = False) -> int | None:
+    """Convert YYYY-MM-DD or timestamp-like values to Unix seconds."""
+
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        raw = int(value)
+        return raw // 1000 if raw > 10_000_000_000 else raw
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        raw = int(float(text))
+        return raw // 1000 if raw > 10_000_000_000 else raw
+    except ValueError:
+        pass
+    try:
+        if len(text) == 10:
+            suffix = "T23:59:59" if end_of_day else "T00:00:00"
+            text = f"{text}{suffix}"
+        return int(datetime.fromisoformat(text).timestamp())
+    except ValueError:
+        return None
+
+
+def _filter_messages_by_time(messages: list, start_ts: int | None, end_ts: int | None) -> list:
+    if start_ts is None and end_ts is None:
+        return messages
+    filtered = []
+    for message in messages:
+        try:
+            msg_ts = int(datetime.fromisoformat(message.ts).timestamp())
+        except (TypeError, ValueError):
+            continue
+        if start_ts is not None and msg_ts < start_ts:
+            continue
+        if end_ts is not None and msg_ts > end_ts:
+            continue
+        filtered.append(message)
+    return filtered
 
 @app.post("/api/upload")
 async def upload_and_analyze(req: dict):
@@ -516,17 +570,92 @@ async def upload_and_analyze(req: dict):
         raise HTTPException(400, "未能解析出消息，请检查JSON格式")
 
     if anonymized:
-        senders = list(dict.fromkeys(m.sender for m in messages))
-        alias_map: dict[str, str] = {}
-        for i, s in enumerate(senders):
-            alias_map[s] = f"{chr(65 + (i % 26))}同学"
-        for m in messages:
-            m.sender = alias_map.get(m.sender, m.sender)
+        _anonymize_messages(messages)
 
     from models import AnalyzeRequest, PrivacyConfig, ClientMeta
     analyze_req = AnalyzeRequest(
         report_type=report_type, source="weflow_json",
         messages=messages, privacy=PrivacyConfig(anonymized=anonymized),
+        client_meta=ClientMeta(),
+    )
+    return await analyze(analyze_req)
+
+
+@app.post("/api/weflow/status")
+async def weflow_status(req: dict):
+    """Check whether the local WeFlow HTTP API is available."""
+
+    return await check_weflow_status(req.get("base_url"))
+
+
+@app.post("/api/weflow/sessions")
+async def weflow_sessions(req: dict):
+    """Read session list from WeFlow's local HTTP API."""
+
+    try:
+        sessions = await fetch_sessions(
+            base_url=req.get("base_url"),
+            access_token=req.get("access_token"),
+            keyword=req.get("keyword", ""),
+            limit=int(req.get("limit", 100)),
+        )
+        return {"sessions": sessions}
+    except WeFlowClientError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
+@app.post("/api/weflow/import", response_model=AnalyzeResponse)
+async def import_weflow_session(req: dict):
+    """Import one WeFlow session through local HTTP API and start analysis."""
+
+    session_id = (req.get("session_id") or "").strip()
+    if not session_id:
+        raise HTTPException(400, "session_id is required")
+    start_ts = _parse_date_bound(req.get("start_date") or req.get("start_time"))
+    end_ts = _parse_date_bound(req.get("end_date") or req.get("end_time"), end_of_day=True)
+
+    try:
+        chatlab_data = await fetch_session_messages_chatlab(
+            session_id=session_id,
+            base_url=req.get("base_url"),
+            access_token=req.get("access_token"),
+            page_limit=int(req.get("page_limit", 5000)),
+            max_messages=int(req.get("max_messages", os.environ.get("MAX_MESSAGES_PER_REQUEST", "50000"))),
+            start_time=start_ts,
+            end_time=end_ts,
+        )
+    except WeFlowClientError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+    messages = parse_chatlab_json(chatlab_data)
+    if not messages:
+        try:
+            raw_data = await fetch_session_messages_raw(
+                session_id=session_id,
+                base_url=req.get("base_url"),
+                access_token=req.get("access_token"),
+                page_limit=int(req.get("page_limit", 5000)),
+                max_messages=int(req.get("max_messages", os.environ.get("MAX_MESSAGES_PER_REQUEST", "50000"))),
+                start_time=start_ts,
+                end_time=end_ts,
+            )
+            messages = parse_and_validate(json.dumps(raw_data, ensure_ascii=False))
+        except (WeFlowClientError, ValueError) as exc:
+            raise HTTPException(400, f"No messages were imported from WeFlow. {exc}") from exc
+    messages = _filter_messages_by_time(messages, start_ts, end_ts)
+    if not messages:
+        raise HTTPException(400, "No messages were imported from WeFlow in the selected time range.")
+
+    anonymized = req.get("anonymized", True)
+    if anonymized:
+        _anonymize_messages(messages)
+
+    from models import AnalyzeRequest, PrivacyConfig, ClientMeta
+    analyze_req = AnalyzeRequest(
+        report_type=req.get("report_type", "group_roast"),
+        source="weflow_json",
+        messages=messages,
+        privacy=PrivacyConfig(anonymized=anonymized),
         client_meta=ClientMeta(),
     )
     return await analyze(analyze_req)
@@ -592,3 +721,4 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=os.environ.get("HOST", "0.0.0.0"),
                 port=int(os.environ.get("PORT", "8000")), reload=True)
+
