@@ -499,7 +499,18 @@ async def get_share_endpoint(slug: str):
 # ── Upload (JSON only) ───────────────────────────────────────────
 
 from parser import parse_and_validate
+from wechat_importer import export_wechat_chat, get_wechat_prepare_status, list_wechat_chats, prepare_wechat_data
 import stats_extra
+
+
+def _anonymize_messages(messages: list) -> dict[str, str]:
+    senders = list(dict.fromkeys(m.sender for m in messages))
+    alias_map: dict[str, str] = {}
+    for i, sender in enumerate(senders):
+        alias_map[sender] = f"{chr(65 + (i % 26))}同学"
+    for message in messages:
+        message.sender = alias_map.get(message.sender, message.sender)
+    return alias_map
 
 @app.post("/api/upload")
 async def upload_and_analyze(req: dict):
@@ -516,12 +527,7 @@ async def upload_and_analyze(req: dict):
         raise HTTPException(400, "未能解析出消息，请检查JSON格式")
 
     if anonymized:
-        senders = list(dict.fromkeys(m.sender for m in messages))
-        alias_map: dict[str, str] = {}
-        for i, s in enumerate(senders):
-            alias_map[s] = f"{chr(65 + (i % 26))}同学"
-        for m in messages:
-            m.sender = alias_map.get(m.sender, m.sender)
+        _anonymize_messages(messages)
 
     from models import AnalyzeRequest, PrivacyConfig, ClientMeta
     analyze_req = AnalyzeRequest(
@@ -530,6 +536,96 @@ async def upload_and_analyze(req: dict):
         client_meta=ClientMeta(),
     )
     return await analyze(analyze_req)
+
+
+@app.get("/api/wechat/chats")
+async def list_wechat_chats_endpoint(
+    query: str = "",
+    limit: int = 50,
+    start_time: str = "",
+    end_time: str = "",
+):
+    """List local WeChat sessions from the configured wechat-decrypt project."""
+    try:
+        return list_wechat_chats(
+            query=query,
+            limit=limit,
+            start_time=start_time,
+            end_time=end_time,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(500, f"读取微信会话失败: {exc}") from exc
+
+
+@app.get("/api/wechat/prepare")
+async def get_wechat_prepare_status_endpoint():
+    """Return whether local WeChat databases are already decrypted."""
+    try:
+        return get_wechat_prepare_status()
+    except Exception as exc:
+        raise HTTPException(500, f"读取微信准备状态失败: {exc}") from exc
+
+
+@app.post("/api/wechat/prepare")
+async def prepare_wechat_endpoint(req: dict | None = None):
+    """Extract keys and decrypt bundled WeChat databases for local import."""
+    req = req or {}
+    try:
+        return prepare_wechat_data(force=bool(req.get("force", False)))
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(500, f"准备微信数据库失败: {exc}") from exc
+
+
+@app.post("/api/wechat/export")
+async def export_wechat_and_analyze(req: dict):
+    """Export one WeChat chat to JSON, parse it, and launch the existing analysis."""
+    username = str(req.get("username", "")).strip()
+    if not username:
+        raise HTTPException(400, "请选择一个微信会话")
+
+    report_type = req.get("report_type", "group_roast")
+    anonymized = req.get("anonymized", True)
+    start_time = str(req.get("start_time", "") or "")
+    end_time = str(req.get("end_time", "") or "")
+
+    try:
+        exported = export_wechat_chat(
+            username=username,
+            start_time=start_time,
+            end_time=end_time,
+        )
+        export_path = exported.get("export_path", "")
+        if not export_path:
+            raise RuntimeError("导出完成但未找到 JSON 文件路径")
+        with open(export_path, "r", encoding="utf-8") as f:
+            text = f.read()
+        messages = parse_and_validate(text)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(500, f"读取导出 JSON 失败: {exc}") from exc
+
+    if anonymized:
+        _anonymize_messages(messages)
+
+    from models import AnalyzeRequest, PrivacyConfig, ClientMeta
+    analyze_req = AnalyzeRequest(
+        report_type=report_type, source="wechat_decrypt_json",
+        messages=messages, privacy=PrivacyConfig(anonymized=anonymized),
+        client_meta=ClientMeta(),
+    )
+    response = await analyze(analyze_req)
+    payload = response.model_dump()
+    payload["export"] = exported
+    return payload
 
 # ── Export ───────────────────────────────────────────────────────
 

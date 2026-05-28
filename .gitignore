@@ -38,3 +38,12 @@ backend/data/
 backend/venv/
 backend/.env
 backend/__pycache__/
+backend/imported_chats/
+backend/wechat_decrypt/config.json
+backend/wechat_decrypt/decrypted/
+backend/wechat_decrypt/decoded_images/
+backend/wechat_decrypt/exported_chats/
+backend/wechat_decrypt/wxwork_decrypted/
+backend/wechat_decrypt/wxwork_export/
+backend/wechat_decrypt/all_keys.json
+backend/wechat_decrypt/wxwork_keys.json

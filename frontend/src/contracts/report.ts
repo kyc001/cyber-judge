@@ -25,7 +25,7 @@ export interface ChatMessage {
 
 export interface AnalyzeRequest {
   report_type: ReportType;
-  source: "wechat_txt" | "weflow_json" | "paste" | "mock";
+  source: "wechat_txt" | "weflow_json" | "wechat_decrypt_json" | "paste" | "mock";
   messages: ChatMessage[];
   privacy: { anonymized: boolean; alias_map?: Record<string, string> };
   client_meta: { schema_version: "2026-05-24"; locale: "zh-CN" };
@@ -35,6 +35,45 @@ export interface AnalyzeResponse {
   report_id: string;
   status: "queued" | "processing" | "done";
   estimated_seconds: number;
+  export?: WechatExportResult;
+}
+
+export interface WechatChatSummary {
+  index: number;
+  username: string;
+  display_name: string;
+  kind: "single" | "group";
+  remark?: string;
+  nick_name?: string;
+  message_count: number;
+  first_time: string;
+  last_time: string;
+  size_status?: string;
+}
+
+export interface WechatChatsResponse {
+  project_dir: string;
+  total: number;
+  chats: WechatChatSummary[];
+}
+
+export interface WechatPrepareStatus {
+  project_dir: string;
+  config_exists: boolean;
+  keys_exists: boolean;
+  decrypted: boolean;
+  session_db: string;
+  ran?: boolean;
+  message?: string;
+  output_tail?: string;
+}
+
+export interface WechatExportResult {
+  chat: string;
+  username: string;
+  export_path: string;
+  message_count: number;
+  new_count: number;
 }
 
 // ── Stats ──────────────────────────────────────────────────────

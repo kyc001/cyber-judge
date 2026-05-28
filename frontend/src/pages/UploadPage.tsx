@@ -1,12 +1,12 @@
 import { ChangeEvent, DragEvent, FormEvent, useMemo, useRef, useState } from "react";
 import {
-  AlertCircle, FileText, HeartHandshake, Loader2,
-  MessageCircleMore, ShieldCheck, Wand2,
+  AlertCircle, CalendarDays, FileText, HeartHandshake, Loader2,
+  MessageCircleMore, RefreshCw, Search, ShieldCheck, Wand2,
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { uploadRawChat } from "../api/client";
+import { exportWechatChatForAnalysis, getWechatChats, prepareWechatData, uploadRawChat } from "../api/client";
 import { Button } from "../components/ui/Button";
-import type { ReportType } from "../contracts/report";
+import type { ReportType, WechatChatSummary } from "../contracts/report";
 
 const MAX_FILE_SIZE = 8 * 1024 * 1024;
 
@@ -21,7 +21,7 @@ interface UploadPreview {
   recommendedType: ReportType;
 }
 
-const TYPE_LABELS: Record<number, string> = {
+const WEFLOW_TYPE_LABELS: Record<number, string> = {
   1: "文字",
   3: "图片",
   34: "语音",
@@ -30,6 +30,24 @@ const TYPE_LABELS: Record<number, string> = {
   49: "文件/链接",
   10000: "系统",
 };
+
+const WECHAT_TYPE_LABELS: Record<string, string> = {
+  text: "文字",
+  image: "图片",
+  voice: "语音",
+  sticker: "表情",
+  video: "视频",
+  link_or_file: "文件/链接",
+  transfer: "转账",
+  system: "系统",
+  recall: "撤回",
+};
+
+function formatUnixTime(value: unknown) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+  return new Date(seconds * 1000).toISOString().slice(0, 16).replace("T", " ");
+}
 
 function buildUploadPreview(raw: string): UploadPreview | null {
   const trimmed = raw.trim();
@@ -42,7 +60,7 @@ function buildUploadPreview(raw: string): UploadPreview | null {
         error: "JSON 中没有识别到 messages 数组。",
         messageCount: 0,
         participantCount: 0,
-        dateRange: "—",
+        dateRange: "-",
         typeRows: [],
         participants: [],
         samples: [],
@@ -50,17 +68,21 @@ function buildUploadPreview(raw: string): UploadPreview | null {
       };
     }
 
-    const participants = Array.from(new Set(messages.map((item) => (
-      String(item.senderDisplayName || item.senderUsername || "未知")
-    ))));
+    const isWechatDecrypt = "timestamp" in messages[0];
+    const participants = Array.from(new Set(messages.map((item) => {
+      if (isWechatDecrypt) return String(item.sender || "未知");
+      return String(item.senderDisplayName || item.senderUsername || "未知");
+    })));
     const typeCount = new Map<string, number>();
     const times = messages
-      .map((item) => String(item.formattedTime || ""))
+      .map((item) => isWechatDecrypt ? formatUnixTime(item.timestamp) : String(item.formattedTime || ""))
       .filter(Boolean)
       .sort();
+
     for (const item of messages) {
-      const localType = Number(item.localType ?? 1);
-      const label = TYPE_LABELS[localType] || "其他";
+      const label = isWechatDecrypt
+        ? WECHAT_TYPE_LABELS[String(item.type || "text")] || "其他"
+        : WEFLOW_TYPE_LABELS[Number(item.localType ?? 1)] || "其他";
       typeCount.set(label, (typeCount.get(label) || 0) + 1);
     }
 
@@ -73,9 +95,13 @@ function buildUploadPreview(raw: string): UploadPreview | null {
         .sort((a, b) => b.count - a.count),
       participants: participants.slice(0, 8),
       samples: messages.slice(0, 4).map((item) => ({
-        sender: String(item.senderDisplayName || item.senderUsername || "未知"),
-        time: String(item.formattedTime || "").slice(0, 16),
-        content: String(item.content || `[${TYPE_LABELS[Number(item.localType ?? 0)] || "非文本消息"}]`).slice(0, 52),
+        sender: isWechatDecrypt
+          ? String(item.sender || "未知")
+          : String(item.senderDisplayName || item.senderUsername || "未知"),
+        time: isWechatDecrypt
+          ? formatUnixTime(item.timestamp)
+          : String(item.formattedTime || "").slice(0, 16),
+        content: String(item.content || item.transcription || "[非文本消息]").slice(0, 52),
       })),
       recommendedType: participants.length === 2 ? "relationship" : "group_roast",
     };
@@ -84,7 +110,7 @@ function buildUploadPreview(raw: string): UploadPreview | null {
       error: "JSON 尚未解析成功，请检查括号、逗号或文件内容。",
       messageCount: 0,
       participantCount: 0,
-      dateRange: "—",
+      dateRange: "-",
       typeRows: [],
       participants: [],
       samples: [],
@@ -105,12 +131,23 @@ export function UploadPage() {
   const [anonymized, setAnonymized] = useState(true);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [wechatQuery, setWechatQuery] = useState("");
+  const [wechatStart, setWechatStart] = useState("");
+  const [wechatEnd, setWechatEnd] = useState("");
+  const [wechatChats, setWechatChats] = useState<WechatChatSummary[]>([]);
+  const [selectedWechat, setSelectedWechat] = useState("");
+  const [wechatError, setWechatError] = useState("");
+  const [wechatTotal, setWechatTotal] = useState(0);
+  const [isLoadingWechat, setIsLoadingWechat] = useState(false);
+  const [isPreparingWechat, setIsPreparingWechat] = useState(false);
+  const [wechatPrepareMessage, setWechatPrepareMessage] = useState("");
+  const [isWechatSubmitting, setIsWechatSubmitting] = useState(false);
   const preview = useMemo(() => buildUploadPreview(text), [text]);
 
   async function readFile(file: File) {
     setError("");
     if (!file.name.endsWith(".json")) {
-      setError("仅支持 WeFlow 导出的 .json 格式。");
+      setError("仅支持 .json 格式。");
       return;
     }
     if (file.size > MAX_FILE_SIZE) {
@@ -130,6 +167,71 @@ export function UploadPage() {
     event.preventDefault();
     const file = event.dataTransfer.files[0];
     if (file) void readFile(file);
+  }
+
+  async function handleLoadWechatChats() {
+    setWechatError("");
+    setIsLoadingWechat(true);
+    try {
+      const response = await getWechatChats({
+        query: wechatQuery,
+        limit: 80,
+        startTime: wechatStart,
+        endTime: wechatEnd,
+      });
+      setWechatChats(response.chats);
+      setWechatTotal(response.total);
+      if (response.chats[0] && !selectedWechat) {
+        setSelectedWechat(response.chats[0].username);
+        setReportType(response.chats[0].kind === "single" ? "relationship" : "group_roast");
+      }
+    } catch (caught) {
+      setWechatError(caught instanceof Error ? caught.message : "读取微信会话失败。");
+    } finally {
+      setIsLoadingWechat(false);
+    }
+  }
+
+  async function handlePrepareWechatData() {
+    setWechatError("");
+    setWechatPrepareMessage("");
+    setIsPreparingWechat(true);
+    try {
+      const status = await prepareWechatData(false);
+      setWechatPrepareMessage(status.message || (status.decrypted ? "微信数据已准备好" : "准备流程已完成"));
+      await handleLoadWechatChats();
+    } catch (caught) {
+      setWechatError(
+        caught instanceof Error
+          ? caught.message
+          : "准备微信数据失败。请确认微信已登录，并用管理员身份启动 Cyber Judge。"
+      );
+    } finally {
+      setIsPreparingWechat(false);
+    }
+  }
+
+  async function handleWechatSubmit() {
+    setWechatError("");
+    if (!selectedWechat) {
+      setWechatError("请选择一个微信会话。");
+      return;
+    }
+    setIsWechatSubmitting(true);
+    try {
+      const response = await exportWechatChatForAnalysis({
+        username: selectedWechat,
+        reportType,
+        anonymized,
+        startTime: wechatStart,
+        endTime: wechatEnd,
+      });
+      navigate(`/analyzing?reportId=${response.report_id}`);
+    } catch (caught) {
+      setWechatError(caught instanceof Error ? caught.message : "导出或分析失败。");
+    } finally {
+      setIsWechatSubmitting(false);
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -162,9 +264,9 @@ export function UploadPage() {
       <section className="upload-layout">
         <form className="upload-panel" onSubmit={handleSubmit}>
           <div className="section-copy">
-            <p className="eyebrow">Upload</p>
-            <h1>上传 WeFlow 导出的 JSON 聊天记录。</h1>
-            <p>仅支持 .json 格式。</p>
+            <p className="eyebrow">Import</p>
+            <h1>选择微信聊天或上传 JSON 记录</h1>
+            <p>支持本机微信解密导出，也保留手动导入 JSON 的流程。</p>
           </div>
 
           <div className="report-type-grid" role="radiogroup" aria-label="选择报告类型">
@@ -188,6 +290,106 @@ export function UploadPage() {
               <strong>双人关系</strong>
               <span>主动程度、共同语言、关系金句</span>
             </button>
+          </div>
+
+          <div className="wechat-import-panel">
+            <div className="wechat-import-head">
+              <div>
+                <p className="eyebrow">Local WeChat</p>
+                <h2>从本机微信选择聊天</h2>
+              </div>
+              <button
+                className="icon-action"
+                disabled={isLoadingWechat || isPreparingWechat}
+                onClick={handleLoadWechatChats}
+                title="刷新会话"
+                type="button"
+              >
+                {isLoadingWechat ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
+              </button>
+            </div>
+            <div className="wechat-filters">
+              <label>
+                <Search size={16} />
+                <input
+                  onChange={(event) => setWechatQuery(event.target.value)}
+                  placeholder="联系人、群名或 wxid"
+                  value={wechatQuery}
+                />
+              </label>
+              <label>
+                <CalendarDays size={16} />
+                <input
+                  onChange={(event) => setWechatStart(event.target.value)}
+                  placeholder="开始时间 2025-01-01"
+                  value={wechatStart}
+                />
+              </label>
+              <label>
+                <CalendarDays size={16} />
+                <input
+                  onChange={(event) => setWechatEnd(event.target.value)}
+                  placeholder="结束时间，可留空"
+                  value={wechatEnd}
+                />
+              </label>
+            </div>
+            <div className="wechat-actions">
+              <button
+                className="inline-link"
+                disabled={isPreparingWechat}
+                onClick={handlePrepareWechatData}
+                type="button"
+              >
+                {isPreparingWechat ? "准备中" : "准备微信数据"}
+              </button>
+              <button className="inline-link" disabled={isLoadingWechat || isPreparingWechat} onClick={handleLoadWechatChats} type="button">
+                {isLoadingWechat ? "读取中" : "读取会话"}
+              </button>
+              {wechatTotal ? <span className="muted">匹配 {wechatTotal} 个会话</span> : null}
+            </div>
+
+            {wechatPrepareMessage ? (
+              <p className="muted" style={{ margin: 0 }}>{wechatPrepareMessage}</p>
+            ) : null}
+
+            {wechatChats.length ? (
+              <div className="wechat-chat-list">
+                {wechatChats.map((chat) => (
+                  <button
+                    className={`wechat-chat-row ${selectedWechat === chat.username ? "wechat-chat-row-active" : ""}`}
+                    key={chat.username}
+                    onClick={() => {
+                      setSelectedWechat(chat.username);
+                      setReportType(chat.kind === "single" ? "relationship" : "group_roast");
+                    }}
+                    type="button"
+                  >
+                    <span>
+                      <strong>{chat.display_name}</strong>
+                      <small>{chat.kind === "group" ? "群聊" : "单聊"} · {chat.username}</small>
+                    </span>
+                    <span>
+                      <strong>{chat.message_count.toLocaleString("zh-CN")}</strong>
+                      <small>{chat.first_time ? `${chat.first_time.slice(0, 10)} ~ ${chat.last_time.slice(0, 10)}` : "无匹配消息"}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {wechatError ? (
+              <p className="error-text"><AlertCircle size={18} />{wechatError}</p>
+            ) : null}
+
+            <Button
+              disabled={isWechatSubmitting || isPreparingWechat || !selectedWechat}
+              icon={isWechatSubmitting ? <Loader2 className="spin" size={18} /> : <Wand2 size={18} />}
+              onClick={handleWechatSubmit}
+              type="button"
+            >
+              {isWechatSubmitting ? "导出中" : "导出并分析"}
+            </Button>
           </div>
 
           <input
@@ -219,7 +421,7 @@ export function UploadPage() {
             <span>或直接粘贴 JSON 文本</span>
             <textarea
               onChange={(event) => setText(event.target.value)}
-              placeholder="在此粘贴 WeFlow JSON 内容..."
+              placeholder="在此粘贴 WeFlow 或微信解密导出的 JSON 内容..."
               value={text}
             />
           </label>
@@ -246,7 +448,7 @@ export function UploadPage() {
             icon={isSubmitting ? <Loader2 className="spin" size={18} /> : <Wand2 size={18} />}
             type="submit"
           >
-            {isSubmitting ? "提交中" : "开始分析"}
+            {isSubmitting ? "提交中" : "分析手动 JSON"}
           </Button>
         </form>
 
@@ -272,7 +474,7 @@ export function UploadPage() {
                   <p className="muted" style={{ margin: 0 }}>时间范围：{preview.dateRange}</p>
                   <p className="muted" style={{ margin: 0 }}>
                     建议模式：{preview.recommendedType === "relationship" ? "双人关系" : "群聊锐评"}
-                    {preview.recommendedType !== reportType ? "，可以在左侧切换" : ""}
+                    {preview.recommendedType !== reportType ? "，可在左侧切换" : ""}
                   </p>
                   <div>
                     <strong>消息结构</strong>
@@ -304,12 +506,12 @@ export function UploadPage() {
             </>
           ) : (
             <>
-              <p className="eyebrow">Tutorial</p>
-              <h2>如何导出 JSON</h2>
+              <p className="eyebrow">Setup</p>
+              <h2>本机微信导入</h2>
               <ol>
-                <li>使用 WeFlow 打开目标聊天</li>
-                <li>导出聊天记录为 JSON</li>
-                <li>回到这里上传，开启默认脱敏</li>
+                <li>先在 wechat-decrypt 项目完成数据库解密</li>
+                <li>点击读取会话，按联系人、群名和时间范围筛选</li>
+                <li>选择会话后直接导出 JSON 并进入分析</li>
               </ol>
             </>
           )}

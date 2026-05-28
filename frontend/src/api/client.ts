@@ -6,6 +6,8 @@ import type {
   ExportPayload,
   ReportPayload,
   SharePayload,
+  WechatChatsResponse,
+  WechatPrepareStatus,
 } from "../contracts/report";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -60,6 +62,50 @@ export async function uploadRawChat(text: string, reportType: string, anonymized
   return requestJson<AnalyzeResponse>("/api/upload", {
     method: "POST",
     body: JSON.stringify({ text, report_type: reportType, anonymized }),
+  });
+}
+
+/** Load local WeChat sessions through the wechat-decrypt adapter. */
+export async function getWechatChats(params: {
+  query?: string;
+  limit?: number;
+  startTime?: string;
+  endTime?: string;
+} = {}): Promise<WechatChatsResponse> {
+  const search = new URLSearchParams();
+  if (params.query) search.set("query", params.query);
+  if (params.limit) search.set("limit", String(params.limit));
+  if (params.startTime) search.set("start_time", params.startTime);
+  if (params.endTime) search.set("end_time", params.endTime);
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return requestJson<WechatChatsResponse>(`/api/wechat/chats${suffix}`);
+}
+
+/** Prepare local WeChat databases by running the bundled decrypt flow. */
+export async function prepareWechatData(force = false): Promise<WechatPrepareStatus> {
+  return requestJson<WechatPrepareStatus>("/api/wechat/prepare", {
+    method: "POST",
+    body: JSON.stringify({ force }),
+  });
+}
+
+/** Export a selected local WeChat chat to JSON and run the existing analysis flow. */
+export async function exportWechatChatForAnalysis(payload: {
+  username: string;
+  reportType: string;
+  anonymized: boolean;
+  startTime?: string;
+  endTime?: string;
+}): Promise<AnalyzeResponse> {
+  return requestJson<AnalyzeResponse>("/api/wechat/export", {
+    method: "POST",
+    body: JSON.stringify({
+      username: payload.username,
+      report_type: payload.reportType,
+      anonymized: payload.anonymized,
+      start_time: payload.startTime || "",
+      end_time: payload.endTime || "",
+    }),
   });
 }
 

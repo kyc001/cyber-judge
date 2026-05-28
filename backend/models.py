@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 ReportType = Literal["group_roast", "relationship"]
 MessageType = Literal["text", "image", "emoji", "file", "link", "system", "red_packet", "transfer", "unknown"]
-SourceType = Literal["wechat_txt", "weflow_json", "paste", "mock"]
+SourceType = Literal["wechat_txt", "weflow_json", "wechat_decrypt_json", "paste", "mock"]
 ToneType = Literal["hot", "soft", "sharp", "calm"]
 SectionType = Literal[
     "summary", "dragon_rank", "heatmap", "keywords", "radar", "emoji", "timeline",

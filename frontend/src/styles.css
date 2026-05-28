@@ -448,6 +448,115 @@ input {
   margin-top: 24px;
 }
 
+.wechat-import-panel {
+  background: #f6f8f4;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 18px;
+}
+
+.wechat-import-head,
+.wechat-actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.wechat-import-head h2 {
+  font-size: 1.15rem;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.icon-action {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  height: 38px;
+  justify-content: center;
+  width: 38px;
+}
+
+.wechat-filters {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(180px, 1.2fr) repeat(2, minmax(140px, 0.9fr));
+}
+
+.wechat-filters label {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 10px;
+}
+
+.wechat-filters svg {
+  color: var(--green);
+  flex: 0 0 auto;
+}
+
+.wechat-filters input {
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  font: inherit;
+  min-width: 0;
+  outline: 0;
+  width: 100%;
+}
+
+.wechat-chat-list {
+  display: grid;
+  gap: 8px;
+  max-height: 300px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.wechat-chat-row {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  cursor: pointer;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 12px;
+  text-align: left;
+}
+
+.wechat-chat-row span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wechat-chat-row small {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wechat-chat-row-active {
+  border-color: rgba(25, 132, 196, 0.75);
+  box-shadow: 0 8px 18px rgba(25, 132, 196, 0.12);
+}
+
 .type-option {
   background: #f9f3e9;
   border: 1px solid var(--line);
@@ -1233,6 +1342,17 @@ input {
 
   .report-type-grid {
     grid-template-columns: 1fr;
+  }
+
+  .wechat-filters,
+  .wechat-chat-row {
+    grid-template-columns: 1fr;
+  }
+
+  .wechat-import-head,
+  .wechat-actions {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .share-card-bottom {
