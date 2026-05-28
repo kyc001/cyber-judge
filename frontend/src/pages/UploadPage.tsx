@@ -1,14 +1,22 @@
-import { ChangeEvent, DragEvent, FormEvent, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertCircle, CalendarDays, FileText, HeartHandshake, Loader2,
-  MessageCircleMore, RefreshCw, Search, ShieldCheck, Wand2,
+  AlertCircle, Brain, CalendarDays, FileText, HeartHandshake, Loader2,
+  MessageCircleMore, Quote, RefreshCw, Search, ShieldCheck, Sparkles, Wand2,
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { exportWechatChatForAnalysis, getWechatChats, prepareWechatData, uploadRawChat } from "../api/client";
+import {
+  exportWechatChatForAnalysis,
+  getExportedChatSample,
+  getExportedChatSamples,
+  getWechatChats,
+  prepareWechatData,
+  uploadRawChat,
+} from "../api/client";
 import { Button } from "../components/ui/Button";
-import type { ReportType, WechatChatSummary } from "../contracts/report";
+import type { ExportedChatSample, ReportType, WechatChatSummary } from "../contracts/report";
 
-const MAX_FILE_SIZE = 8 * 1024 * 1024;
+const MAX_FILE_SIZE_MB = 30;
+const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 interface UploadPreview {
   error?: string;
@@ -20,6 +28,50 @@ interface UploadPreview {
   samples: { sender: string; time: string; content: string }[];
   recommendedType: ReportType;
 }
+
+type AnalysisIntent = "auto_roast" | "group_dynamics" | "relationship_lab" | "quote_mining";
+
+const ANALYSIS_INTENTS: {
+  id: AnalysisIntent;
+  icon: typeof Brain;
+  title: string;
+  body: string;
+  reportType: ReportType;
+  chips: string[];
+}[] = [
+  {
+    id: "auto_roast",
+    icon: Brain,
+    title: "AI 自主锐评",
+    body: "让 AI 先自己判断最值得吐槽、最值得截图、最像关系信号的地方。",
+    reportType: "group_roast",
+    chips: ["重点摘要", "异常信号", "自由发挥"],
+  },
+  {
+    id: "group_dynamics",
+    icon: MessageCircleMore,
+    title: "群聊体检",
+    body: "看谁在控场、谁是龙王、群里有哪些共同暗号和人设分工。",
+    reportType: "group_roast",
+    chips: ["龙王榜", "群人设", "互动图谱"],
+  },
+  {
+    id: "relationship_lab",
+    icon: HeartHandshake,
+    title: "好友关系",
+    body: "适合两人聊天，分析主动程度、回复节奏、关系温度和共同语言。",
+    reportType: "relationship",
+    chips: ["主动程度", "关系温度", "里程碑"],
+  },
+  {
+    id: "quote_mining",
+    icon: Quote,
+    title: "名场面挖掘",
+    body: "优先找真实原话、神奇接话和能做分享卡片的聊天片段。",
+    reportType: "group_roast",
+    chips: ["真实金句", "截图时刻", "梗密度"],
+  },
+];
 
 const WEFLOW_TYPE_LABELS: Record<number, string> = {
   1: "文字",
@@ -42,6 +94,18 @@ const WECHAT_TYPE_LABELS: Record<string, string> = {
   system: "系统",
   recall: "撤回",
 };
+
+function formatBytes(value: number) {
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.round(value / 1024)} KB`;
+}
+
+function recommendedLabel(sample: ExportedChatSample) {
+  if (sample.message_count > 0) {
+    return `${sample.message_count.toLocaleString("zh-CN")} 条`;
+  }
+  return formatBytes(sample.byte_size);
+}
 
 function formatUnixTime(value: unknown) {
   const seconds = Number(value);
@@ -126,6 +190,9 @@ export function UploadPage() {
   const initialReportType: ReportType =
     searchParams.get("type") === "relationship" ? "relationship" : "group_roast";
   const [reportType, setReportType] = useState<ReportType>(initialReportType);
+  const [analysisIntent, setAnalysisIntent] = useState<AnalysisIntent>(
+    initialReportType === "relationship" ? "relationship_lab" : "auto_roast",
+  );
   const [text, setText] = useState("");
   const [fileName, setFileName] = useState("");
   const [anonymized, setAnonymized] = useState(true);
@@ -142,7 +209,58 @@ export function UploadPage() {
   const [isPreparingWechat, setIsPreparingWechat] = useState(false);
   const [wechatPrepareMessage, setWechatPrepareMessage] = useState("");
   const [isWechatSubmitting, setIsWechatSubmitting] = useState(false);
+  const [sampleQuery, setSampleQuery] = useState("");
+  const [sampleKind, setSampleKind] = useState<"all" | "group" | "single">("all");
+  const [sampleChats, setSampleChats] = useState<ExportedChatSample[]>([]);
+  const [sampleTotal, setSampleTotal] = useState(0);
+  const [selectedSample, setSelectedSample] = useState("");
+  const [sampleError, setSampleError] = useState("");
+  const [isLoadingSamples, setIsLoadingSamples] = useState(false);
+  const [isLoadingSampleFile, setIsLoadingSampleFile] = useState(false);
   const preview = useMemo(() => buildUploadPreview(text), [text]);
+  const activeIntent = ANALYSIS_INTENTS.find((intent) => intent.id === analysisIntent) ?? ANALYSIS_INTENTS[0];
+
+  function selectAnalysisIntent(intent: (typeof ANALYSIS_INTENTS)[number]) {
+    setAnalysisIntent(intent.id);
+    setReportType(intent.reportType);
+  }
+
+  function selectReportType(nextType: ReportType) {
+    setReportType(nextType);
+    setAnalysisIntent(nextType === "relationship" ? "relationship_lab" : "group_dynamics");
+  }
+
+  async function loadExportedSamples(nextKind = sampleKind, nextQuery = sampleQuery) {
+    setSampleError("");
+    setIsLoadingSamples(true);
+    try {
+      const response = await getExportedChatSamples({
+        query: nextQuery,
+        kind: nextKind,
+        limit: 18,
+      });
+      setSampleChats(response.chats);
+      setSampleTotal(response.total);
+      if (response.chats[0]) {
+        setSelectedSample((current) =>
+          current && response.chats.some((chat) => chat.file_name === current)
+            ? current
+            : response.chats[0].file_name,
+        );
+      } else {
+        setSelectedSample("");
+      }
+    } catch (caught) {
+      setSampleError(caught instanceof Error ? caught.message : "读取导出样例失败。");
+    } finally {
+      setIsLoadingSamples(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadExportedSamples("all", "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function readFile(file: File) {
     setError("");
@@ -151,11 +269,32 @@ export function UploadPage() {
       return;
     }
     if (file.size > MAX_FILE_SIZE) {
-      setError("文件超过 8MB。");
+      setError(`文件超过 ${MAX_FILE_SIZE_MB}MB。`);
       return;
     }
     setFileName(file.name);
     setText(await file.text());
+  }
+
+  async function handleLoadSelectedSample(fileName = selectedSample) {
+    if (!fileName) {
+      setSampleError("请先选择一个导出样例。");
+      return;
+    }
+    setSampleError("");
+    setError("");
+    setIsLoadingSampleFile(true);
+    try {
+      const payload = await getExportedChatSample(fileName);
+      setSelectedSample(payload.file_name);
+      setFileName(payload.file_name);
+      setText(payload.text);
+      selectReportType(payload.kind === "single" ? "relationship" : "group_roast");
+    } catch (caught) {
+      setSampleError(caught instanceof Error ? caught.message : "载入导出样例失败。");
+    } finally {
+      setIsLoadingSampleFile(false);
+    }
   }
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -183,7 +322,7 @@ export function UploadPage() {
       setWechatTotal(response.total);
       if (response.chats[0] && !selectedWechat) {
         setSelectedWechat(response.chats[0].username);
-        setReportType(response.chats[0].kind === "single" ? "relationship" : "group_roast");
+        selectReportType(response.chats[0].kind === "single" ? "relationship" : "group_roast");
       }
     } catch (caught) {
       setWechatError(caught instanceof Error ? caught.message : "读取微信会话失败。");
@@ -264,16 +403,40 @@ export function UploadPage() {
       <section className="upload-layout">
         <form className="upload-panel" onSubmit={handleSubmit}>
           <div className="section-copy">
-            <p className="eyebrow">Import</p>
-            <h1>选择微信聊天或上传 JSON 记录</h1>
-            <p>支持本机微信解密导出，也保留手动导入 JSON 的流程。</p>
+            <p className="eyebrow">Import / Intent</p>
+            <h1>先告诉 AI 你想看哪种聊天真相</h1>
+            <p>选择一个分析意图，再从本地微信、导出样例或手动 JSON 进入分析。</p>
+          </div>
+
+          <div className="analysis-intent-grid" role="radiogroup" aria-label="选择 AI 分析意图">
+            {ANALYSIS_INTENTS.map((intent) => {
+              const Icon = intent.icon;
+              const active = analysisIntent === intent.id;
+              return (
+                <button
+                  aria-checked={active}
+                  className={`analysis-intent-card ${active ? "analysis-intent-active" : ""}`}
+                  key={intent.id}
+                  onClick={() => selectAnalysisIntent(intent)}
+                  role="radio"
+                  type="button"
+                >
+                  <span className="analysis-intent-icon"><Icon size={18} /></span>
+                  <strong>{intent.title}</strong>
+                  <span>{intent.body}</span>
+                  <span className="intent-chip-row">
+                    {intent.chips.map((chip) => <em key={chip}>{chip}</em>)}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           <div className="report-type-grid" role="radiogroup" aria-label="选择报告类型">
             <button
               aria-checked={reportType === "group_roast"}
               className={`type-option ${reportType === "group_roast" ? "type-option-active" : ""}`}
-              onClick={() => setReportType("group_roast")}
+              onClick={() => selectReportType("group_roast")}
               role="radio" type="button"
             >
               <MessageCircleMore size={20} />
@@ -283,13 +446,103 @@ export function UploadPage() {
             <button
               aria-checked={reportType === "relationship"}
               className={`type-option ${reportType === "relationship" ? "type-option-active" : ""}`}
-              onClick={() => setReportType("relationship")}
+              onClick={() => selectReportType("relationship")}
               role="radio" type="button"
             >
               <HeartHandshake size={20} />
               <strong>双人关系</strong>
               <span>主动程度、共同语言、关系金句</span>
             </button>
+          </div>
+
+          <div className="sample-import-panel">
+            <div className="sample-import-head">
+              <div>
+                <p className="eyebrow">Exported Cases</p>
+                <h2>挑一个中等样例先跑</h2>
+              </div>
+              <button
+                className="icon-action"
+                disabled={isLoadingSamples}
+                onClick={() => loadExportedSamples()}
+                title="刷新样例"
+                type="button"
+              >
+                {isLoadingSamples ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
+              </button>
+            </div>
+            <div className="sample-toolbar">
+              <label>
+                <Search size={16} />
+                <input
+                  onChange={(event) => setSampleQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void loadExportedSamples(sampleKind, sampleQuery);
+                    }
+                  }}
+                  placeholder="搜群名、联系人或活动名"
+                  value={sampleQuery}
+                />
+              </label>
+              <div className="sample-kind-tabs" role="radiogroup" aria-label="样例类型">
+                {([
+                  ["all", "全部"],
+                  ["group", "群聊"],
+                  ["single", "单聊"],
+                ] as const).map(([kind, label]) => (
+                  <button
+                    aria-checked={sampleKind === kind}
+                    className={sampleKind === kind ? "sample-kind-active" : ""}
+                    key={kind}
+                    onClick={() => {
+                      setSampleKind(kind);
+                      void loadExportedSamples(kind, sampleQuery);
+                    }}
+                    role="radio"
+                    type="button"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="sample-summary">
+              <span>推荐 40KB-180KB，适合快速预览和调 UI</span>
+              {sampleTotal ? <strong>{sampleTotal} 个匹配</strong> : null}
+            </div>
+            {sampleChats.length ? (
+              <div className="sample-chat-list">
+                {sampleChats.map((sample) => (
+                  <button
+                    className={`sample-chat-row ${selectedSample === sample.file_name ? "sample-chat-row-active" : ""}`}
+                    key={sample.file_name}
+                    onClick={() => {
+                      setSelectedSample(sample.file_name);
+                      selectReportType(sample.kind === "single" ? "relationship" : "group_roast");
+                      void handleLoadSelectedSample(sample.file_name);
+                    }}
+                    type="button"
+                  >
+                    <span>
+                      <strong>{sample.display_name}</strong>
+                      <small>{sample.kind === "group" ? "群聊" : "单聊"} · {sample.file_name}</small>
+                    </span>
+                    <span>
+                      <strong>{recommendedLabel(sample)}</strong>
+                      <small>{formatBytes(sample.byte_size)} · {sample.date_first_msg ? `${sample.date_first_msg.slice(0, 10)} ~ ${sample.date_last_msg.slice(0, 10)}` : "时间未知"}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="muted" style={{ margin: 0 }}>
+                {isLoadingSamples ? "正在读取样例..." : "没有匹配的中等样例，可以换个关键词或直接拖入 JSON。"}
+              </p>
+            )}
+            {sampleError ? <p className="error-text"><AlertCircle size={18} />{sampleError}</p> : null}
+            {isLoadingSampleFile ? <p className="muted" style={{ margin: 0 }}>正在载入选中的 JSON...</p> : null}
           </div>
 
           <div className="wechat-import-panel">
@@ -361,7 +614,7 @@ export function UploadPage() {
                     key={chat.username}
                     onClick={() => {
                       setSelectedWechat(chat.username);
-                      setReportType(chat.kind === "single" ? "relationship" : "group_roast");
+                      selectReportType(chat.kind === "single" ? "relationship" : "group_roast");
                     }}
                     type="button"
                   >
@@ -407,7 +660,7 @@ export function UploadPage() {
           >
             <FileText size={30} />
             <strong>{fileName || "拖拽 .json 文件到这里"}</strong>
-            <span>或点击选择文件，最大 8MB</span>
+            <span>或点击选择文件，最大 {MAX_FILE_SIZE_MB}MB</span>
             <button
               className="inline-link"
               onClick={() => inputRef.current?.click()}
@@ -453,6 +706,16 @@ export function UploadPage() {
         </form>
 
         <aside className="tutorial-panel">
+          <div className="ai-brief-panel">
+            <p className="eyebrow">AI Brief</p>
+            <h2>{activeIntent.title}</h2>
+            <p>{activeIntent.body}</p>
+            <div className="ai-brief-list">
+              <span><Sparkles size={16} /> 先给“最值得看”的结论</span>
+              <span><MessageCircleMore size={16} /> 再拆时间、语言、互动、情绪</span>
+              <span><Quote size={16} /> 最后挑可分享的真实金句</span>
+            </div>
+          </div>
           {preview ? (
             <>
               <p className="eyebrow">Data Preview</p>

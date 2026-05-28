@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from models import (
     ChatDNASummary,
+    ContentHighlight,
+    DialogueLine,
     EmojiStat,
     HeatmapCell,
     HeroBlock,
@@ -51,6 +53,7 @@ def generate_group_fallback(
     stats: ReportStats,
     participants: list[ParticipantStat],
     top_senders: list[str],
+    highlight_windows: list[dict] | None = None,
 ) -> ReportPayload:
     report_id = new_id()
     idx = len(participants) % 3
@@ -121,6 +124,7 @@ def generate_group_fallback(
                           body="AI 掐指一算，群聊的未来走向是这样的——", chart_ref="predictions"),
         ],
         quotes=quotes,
+        content_highlights=_build_fallback_highlights(highlight_windows, quotes, "group_roast"),
         stats=stats,
         share=ShareBlock(hook="来测测你在群里是几号龙王", watermark="赛博判官生成"),
     )
@@ -130,6 +134,7 @@ def generate_relationship_fallback(
     stats: ReportStats,
     participants: list[ParticipantStat],
     top_senders: list[str],
+    highlight_windows: list[dict] | None = None,
 ) -> ReportPayload:
     report_id = new_id()
     idx = len(participants) % 2
@@ -178,9 +183,68 @@ def generate_relationship_fallback(
                           body="AI 掐指一算，你们的关系走向是这样的——", chart_ref="predictions"),
         ],
         quotes=quotes,
+        content_highlights=_build_fallback_highlights(highlight_windows, quotes, "relationship"),
         stats=stats,
         share=ShareBlock(hook="来测测你和 TA 到底是什么关系", watermark="赛博判官关系报告"),
     )
+
+
+def _build_fallback_highlights(
+    highlight_windows: list[dict] | None,
+    quotes: list[QuoteItem],
+    report_type: str,
+) -> list[ContentHighlight]:
+    highlights: list[ContentHighlight] = []
+    titles = (
+        ["群聊梗点", "接话节奏", "名场面候选"]
+        if report_type == "group_roast"
+        else ["默契证据", "接话节奏", "关系暗号"]
+    )
+    tags = (
+        ["meme", "rhythm", "content"]
+        if report_type == "group_roast"
+        else ["relationship", "rhythm", "warmth"]
+    )
+
+    for index, window in enumerate((highlight_windows or [])[:3], start=1):
+        evidence: list[DialogueLine] = []
+        for line in window.get("evidence", [])[:4]:
+            text = str(line.get("text") or line.get("content") or "").strip()
+            if not text:
+                continue
+            evidence.append(DialogueLine(
+                sender=str(line.get("sender", "")),
+                text=text[:180],
+                ts=line.get("ts") or None,
+            ))
+        if not evidence:
+            continue
+        title = titles[(index - 1) % len(titles)]
+        insight = (
+            "这段对话比单条金句更能说明群聊氛围：有人抛梗、有人接住，信息密度和情绪反应都比较集中。"
+            if report_type == "group_roast"
+            else "这段对话能看出两个人的互动模式：不是只看谁说得多，而是看谁会接话、补充和把情绪稳住。"
+        )
+        highlights.append(ContentHighlight(
+            id=f"h{index}",
+            title=title,
+            insight=insight,
+            tag=tags[(index - 1) % len(tags)],
+            evidence=evidence,
+        ))
+
+    if highlights:
+        return highlights
+
+    for index, quote in enumerate(quotes[:3], start=1):
+        highlights.append(ContentHighlight(
+            id=f"h{index}",
+            title="金句证据",
+            insight="LLM 不可用时，系统会先把候选金句保留下来，作为后续内容点评和名场面回放的证据。",
+            tag="content",
+            evidence=[DialogueLine(sender=quote.speaker, text=quote.text)],
+        ))
+    return highlights
 
 
 def _build_fallback_quotes(top_senders: list[str], report_type: str) -> list[QuoteItem]:

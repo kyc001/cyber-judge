@@ -57,6 +57,27 @@ export interface WechatChatsResponse {
   chats: WechatChatSummary[];
 }
 
+export interface ExportedChatSample {
+  file_name: string;
+  display_name: string;
+  kind: "single" | "group";
+  byte_size: number;
+  message_count: number;
+  date_first_msg: string;
+  date_last_msg: string;
+  updated_at: string;
+}
+
+export interface ExportedChatsResponse {
+  directory: string;
+  total: number;
+  chats: ExportedChatSample[];
+}
+
+export interface ExportedChatPayload extends ExportedChatSample {
+  text: string;
+}
+
 export interface WechatPrepareStatus {
   project_dir: string;
   config_exists: boolean;
@@ -209,12 +230,21 @@ export interface ReportSection {
   chart_ref?: keyof ReportStats;
 }
 export interface QuoteItem { id: string; speaker: string; text: string; comment: string; icon: string; }
+export interface DialogueLine { sender: string; text: string; ts?: string; }
+export interface ContentHighlight {
+  id: string;
+  title: string;
+  insight: string;
+  evidence: DialogueLine[];
+  tag: string;
+}
 
 export interface ReportPayload {
   report_id: string; report_type: ReportType; created_at: string;
   title: string; tagline: string;
   hero: { kicker: string; quote: string; visual: string };
   tags: string[]; sections: ReportSection[]; quotes: QuoteItem[];
+  content_highlights?: ContentHighlight[];
   stats: ReportStats;
   share: { slug?: string; hook: string; watermark: string };
 }

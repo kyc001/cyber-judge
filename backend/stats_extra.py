@@ -25,8 +25,10 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from typing import Optional
 
+import jieba
+
 from models import ChatMessage, ParticipantStat
-from stats import _extract_message_emojis
+from stats import _STOP_WORDS, _extract_message_emojis
 
 _STICKER_RE = re.compile(r"\[[一-鿿_a-zA-Z]{2,12}\]")
 URL_RE = re.compile(r"https?://[^\s]+")
@@ -183,22 +185,100 @@ def compute_lost_friend(messages: list[ChatMessage], participants: list[Particip
     return {"name": best[0], "early_count": best[1], "late_count": best[2]}
 
 
-# ── B3.9: N-Grams ────────────────────────────────────────────────
+# ── B3.9: High-frequency phrases ─────────────────────────────────
 
-def compute_ngrams(messages: list[ChatMessage], min_len=2, max_len=5, top_n=40) -> list[dict]:
-    ngram_counter: Counter[str] = Counter()
+_PHRASE_STOP_WORDS = _STOP_WORDS | {
+    "不是", "没有", "看到", "自己", "感觉", "觉得", "这个", "那个", "这一",
+    "那一", "这么", "那么", "这里", "那里", "这种", "那种", "这样", "那样",
+    "一些", "一下", "一点", "一块", "这一块", "一个", "一种", "一样", "时候",
+    "东西", "事情", "问题", "情况", "的话", "就是", "还是", "其实", "然后",
+    "还有", "不能", "不会", "不用", "不要", "为啥", "咋办", "咋样", "啥",
+}
+_PHRASE_BOUNDARY_RE = re.compile(r"[\s,，。！？!?；;、：:（）()《》<>\"'“”‘’\n\r\t]+")
+_HAS_CHINESE_RE = re.compile(r"[一-鿿]")
+_BAD_SINGLE_RE = re.compile(r"^(哈|哈哈|哈哈哈|啊|嗯|哦|呃|诶|哎|唉|呀|吧|嘛|呢)+$")
+
+
+def _clean_phrase_text(text: str) -> str:
+    text = _STICKER_RE.sub(" ", text)
+    text = re.sub(r"\[[^\]]+\]", " ", text)
+    text = URL_RE.sub(" ", text)
+    text = re.sub(r"@[^\s]+", " ", text)
+    text = re.sub(r"[「【].*?[」】]", " ", text)
+    return text
+
+
+def _is_phrase_token(token: str) -> bool:
+    token = token.strip().lower()
+    if len(token) < 2:
+        return False
+    if token in _PHRASE_STOP_WORDS:
+        return False
+    if any(ch.isdigit() for ch in token):
+        return False
+    if re.fullmatch(r"[a-z_]+", token):
+        return False
+    if re.fullmatch(r"[^\w一-鿿]+", token):
+        return False
+    if _BAD_SINGLE_RE.fullmatch(token):
+        return False
+    return True
+
+
+def _is_good_phrase(phrase: str, tokens: list[str], min_len: int, max_len: int) -> bool:
+    if len(phrase) < min_len or len(phrase) > max_len:
+        return False
+    if not _HAS_CHINESE_RE.search(phrase):
+        return False
+    if phrase in _PHRASE_STOP_WORDS:
+        return False
+    if any(ch.isdigit() for ch in phrase):
+        return False
+    if len(tokens) == 1 and len(phrase) < 4:
+        return False
+    return True
+
+
+def _phrase_candidates(text: str, min_len: int, max_len: int) -> set[str]:
+    candidates: set[str] = set()
+    for segment in _PHRASE_BOUNDARY_RE.split(_clean_phrase_text(text)):
+        if not segment:
+            continue
+        raw_tokens = [token.strip() for token in jieba.lcut(segment) if token.strip()]
+        for start in range(len(raw_tokens)):
+            if not _is_phrase_token(raw_tokens[start]):
+                continue
+            phrase_tokens: list[str] = []
+            for token in raw_tokens[start:start + 4]:
+                if not _is_phrase_token(token):
+                    break
+                phrase_tokens.append(token)
+                phrase = "".join(phrase_tokens)
+                if _is_good_phrase(phrase, phrase_tokens, min_len, max_len):
+                    candidates.add(phrase)
+    return candidates
+
+
+def compute_ngrams(messages: list[ChatMessage], min_len=3, max_len=12, top_n=40) -> list[dict]:
+    phrase_counter: Counter[str] = Counter()
     for m in messages:
-        if m.type == "system": continue
-        text = _STICKER_RE.sub(" ", m.content)
-        text = re.sub(r"https?://\S+", " ", text)
-        text = re.sub(r"[^一-鿿\w]", " ", text)
-        chars = text.replace(" ", "")
-        for n in range(min_len, min(max_len+1, len(chars)+1)):
-            for i in range(len(chars)-n+1):
-                g = chars[i:i+n]
-                if not any(c.isdigit() for c in g):
-                    ngram_counter[g] += 1
-    return [{"phrase": p, "count": c} for p, c in ngram_counter.most_common(top_n)]
+        if m.type == "system":
+            continue
+        phrase_counter.update(_phrase_candidates(m.content, min_len, max_len))
+
+    selected: list[tuple[str, int]] = []
+    for phrase, count in sorted(phrase_counter.items(), key=lambda x: (-x[1], -len(x[0]), x[0])):
+        if count < 2:
+            continue
+        if any(
+            (phrase in kept or kept in phrase) and count <= kept_count * 1.15
+            for kept, kept_count in selected
+        ):
+            continue
+        selected.append((phrase, count))
+        if len(selected) >= top_n:
+            break
+    return [{"phrase": phrase, "count": count} for phrase, count in selected]
 
 
 # ── B4: Emoji Analysis ───────────────────────────────────────────

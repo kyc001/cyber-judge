@@ -306,6 +306,20 @@ class QuoteItem(BaseModel):
     icon: str = "sparkles"
 
 
+class DialogueLine(BaseModel):
+    sender: str
+    text: str
+    ts: Optional[str] = None
+
+
+class ContentHighlight(BaseModel):
+    id: str
+    title: str
+    insight: str
+    evidence: list[DialogueLine] = Field(default_factory=list)
+    tag: str = "content"
+
+
 class HeroBlock(BaseModel):
     kicker: str
     quote: str
@@ -330,6 +344,7 @@ class ReportPayload(BaseModel):
     tags: list[str]
     sections: list[ReportSection]
     quotes: list[QuoteItem]
+    content_highlights: list[ContentHighlight] = Field(default_factory=list)
     stats: ReportStats
     share: ShareBlock
 

@@ -110,7 +110,8 @@ WeFlow JSON → Parser → ChatMessage[] → Stats Engine → ReportStats
                                         │ 3. quotes        │ parallel
                                         │ 4. sections       │  │
                                         │ 5. predictions    │  │
-                                        │ 6. chat_dna       │  │
+                                        │ 6. highlights     │  │
+                                        │ 7. chat_dna       │  │
                                         └─────────────────────┘
                                                ↓
                                         Merge + Validate
@@ -142,7 +143,7 @@ After analysis, the frontend enters the first theme page directly and advances t
 ## Key Design Decisions
 
 1. **JSON-only input** — WeFlow JSON format only, backend handles parsing and validation
-2. **Multi-call LLM** — 6 targeted sub-calls (hero, participants, quotes, sections, predictions, chat_dna) for higher quality than a single monolithic prompt
+2. **Multi-call LLM** — 7 targeted sub-calls (hero, participants, quotes, sections, predictions, content_highlights, chat_dna) for higher quality than a single monolithic prompt
 3. **SSE progress** — Server-Sent Events stream real-time sub-call progress to the frontend
 4. **JSON repair** — Truncated LLM output is repaired before parsing (close strings, balance braces/brackets, strip code fences)
 5. **Auto-start backend** — Vite plugin spawns the Python backend on `npm run dev`, no manual steps

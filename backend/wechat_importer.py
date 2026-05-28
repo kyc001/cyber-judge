@@ -17,6 +17,7 @@ from typing import Any
 BACKEND_DIR = Path(__file__).resolve().parent
 BUNDLED_WECHAT_DECRYPT_DIR = BACKEND_DIR / "wechat_decrypt"
 DEFAULT_IMPORT_DIR = BACKEND_DIR / "imported_chats"
+DEFAULT_EXPORTED_CHATS_DIR = BUNDLED_WECHAT_DECRYPT_DIR / "exported_chats"
 
 
 @dataclass(frozen=True)
@@ -262,3 +263,91 @@ def export_wechat_chat(
         "message_count": total_count,
         "new_count": new_count,
     }
+
+
+def _exported_chats_dir() -> Path:
+    return Path(os.environ.get("WECHAT_EXPORTED_CHATS_DIR", str(DEFAULT_EXPORTED_CHATS_DIR)))
+
+
+def _exported_file_meta(path: Path, *, read_messages: bool = False) -> dict[str, Any]:
+    stat = path.stat()
+    stem = path.stem
+    kind = "group" if path.name.startswith("group_") else "single"
+    display_name = stem.replace("group_", "", 1).replace("single_", "", 1)
+    meta: dict[str, Any] = {
+        "file_name": path.name,
+        "display_name": display_name,
+        "kind": kind,
+        "byte_size": stat.st_size,
+        "message_count": 0,
+        "date_first_msg": "",
+        "date_last_msg": "",
+        "updated_at": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+    }
+    if not read_messages:
+        return meta
+
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        messages = data.get("messages", []) if isinstance(data, dict) else []
+        meta.update({
+            "display_name": str(data.get("chat") or display_name),
+            "message_count": len(messages) if isinstance(messages, list) else 0,
+            "date_first_msg": str(data.get("date_first_msg") or ""),
+            "date_last_msg": str(data.get("date_last_msg") or ""),
+        })
+    except (OSError, json.JSONDecodeError):
+        pass
+    return meta
+
+
+def list_exported_chat_samples(
+    *,
+    query: str = "",
+    kind: str = "all",
+    limit: int = 24,
+    min_size: int = 40 * 1024,
+    max_size: int = 180 * 1024,
+) -> dict[str, Any]:
+    """List medium-sized JSON exports for quick frontend demo selection."""
+    exported_dir = _exported_chats_dir()
+    if not exported_dir.exists():
+        raise RuntimeError(f"未找到导出的聊天目录：{exported_dir}")
+
+    needle = query.strip().lower()
+    allowed_kind = kind if kind in {"group", "single"} else "all"
+    rows: list[Path] = []
+    for path in exported_dir.glob("*.json"):
+        if path.name == "_export_index.json":
+            continue
+        size = path.stat().st_size
+        row_kind = "group" if path.name.startswith("group_") else "single"
+        if allowed_kind != "all" and row_kind != allowed_kind:
+            continue
+        if size < min_size or size > max_size:
+            continue
+        if needle and needle not in path.stem.lower():
+            continue
+        rows.append(path)
+
+    rows.sort(key=lambda item: (abs(item.stat().st_size - 80 * 1024), item.name))
+    capped = rows[: max(1, min(limit, 80))]
+    samples = [_exported_file_meta(path, read_messages=True) for path in capped]
+    return {
+        "directory": str(exported_dir),
+        "total": len(rows),
+        "chats": samples,
+    }
+
+
+def load_exported_chat_sample(file_name: str) -> dict[str, Any]:
+    exported_dir = _exported_chats_dir()
+    target = exported_dir / Path(file_name).name
+    if not target.exists() or target.name == "_export_index.json":
+        raise FileNotFoundError(f"未找到导出样例：{file_name}")
+    if target.suffix.lower() != ".json":
+        raise ValueError("仅支持 JSON 导出样例")
+    meta = _exported_file_meta(target, read_messages=True)
+    with target.open("r", encoding="utf-8") as f:
+        return {**meta, "text": f.read()}

@@ -2,6 +2,8 @@
 
 import type {
   AnalyzeResponse,
+  ExportedChatPayload,
+  ExportedChatsResponse,
   ExportFormat,
   ExportPayload,
   ReportPayload,
@@ -79,6 +81,29 @@ export async function getWechatChats(params: {
   if (params.endTime) search.set("end_time", params.endTime);
   const suffix = search.toString() ? `?${search.toString()}` : "";
   return requestJson<WechatChatsResponse>(`/api/wechat/chats${suffix}`);
+}
+
+/** List medium-sized local JSON exports for quick demo and QA runs. */
+export async function getExportedChatSamples(params: {
+  query?: string;
+  kind?: "all" | "group" | "single";
+  limit?: number;
+  minSize?: number;
+  maxSize?: number;
+} = {}): Promise<ExportedChatsResponse> {
+  const search = new URLSearchParams();
+  if (params.query) search.set("query", params.query);
+  if (params.kind) search.set("kind", params.kind);
+  if (params.limit) search.set("limit", String(params.limit));
+  if (params.minSize) search.set("min_size", String(params.minSize));
+  if (params.maxSize) search.set("max_size", String(params.maxSize));
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return requestJson<ExportedChatsResponse>(`/api/wechat/exported-chats${suffix}`);
+}
+
+/** Load one local exported JSON file into the manual upload preview flow. */
+export async function getExportedChatSample(fileName: string): Promise<ExportedChatPayload> {
+  return requestJson<ExportedChatPayload>(`/api/wechat/exported-chats/${encodeURIComponent(fileName)}`);
 }
 
 /** Prepare local WeChat databases by running the bundled decrypt flow. */

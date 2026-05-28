@@ -37,6 +37,7 @@ import {
   WordCommonalityChart,
   WordSpecificityChart,
 } from "../components/report/Charts";
+import { ContentHighlightsPanel } from "../components/report/ContentHighlights";
 import type { ReportPayload } from "../contracts/report";
 
 type InsightView =
@@ -57,8 +58,8 @@ const VIEW_META: { id: InsightView; title: string; body: string }[] = [
 ];
 
 const cardStyle = {
-  background: "var(--bg-secondary)",
-  border: "1px solid var(--border-default)",
+  background: "var(--report-panel, var(--bg-secondary))",
+  border: "1px solid var(--report-line, var(--border-default))",
   borderRadius: "var(--radius-sm)",
   padding: "1rem",
 } as const;
@@ -228,6 +229,12 @@ function SummaryView({ report }: { report: ReportPayload }) {
   const stats = report.stats;
   return (
     <>
+      <ContentHighlightsPanel
+        compact
+        highlights={report.content_highlights}
+        title="这份聊天最有内容的几处"
+        intro="AI 会优先读这些真实对话片段，再结合统计结果判断群聊氛围、关系模式和名场面。"
+      />
       <SectionBlock kicker="总览" title="聊天总账">
         <AnnualSummaryCard annual={stats.annual_summary} />
       </SectionBlock>
@@ -444,6 +451,12 @@ function QuotesView({ report }: { report: ReportPayload }) {
   const stats = report.stats;
   return (
     <>
+      <ContentHighlightsPanel
+        compact
+        highlights={report.content_highlights}
+        title="带证据的名场面"
+        intro="这里展示的是 AI 判断时实际参考的上下文，不只是孤立的一句金句。"
+      />
       <SectionBlock kicker="金句" title="AI 标注的名场面">
         <div className="v2-stack">
           {report.quotes.length ? (

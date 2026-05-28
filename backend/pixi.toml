@@ -1,0 +1,24 @@
+[workspace]
+authors = ["kyc001 <852117630@qq.com>"]
+channels = ["conda-forge"]
+name = "backend"
+platforms = ["win-64"]
+version = "0.1.0"
+
+[tasks]
+start = "uvicorn main:app --reload --port 8000"
+
+[dependencies]
+python = ">=3.11,<3.14"
+fastapi = "==0.115.6"
+uvicorn = "==0.34.0"
+pydantic = "==2.10.4"
+httpx = "==0.28.1"
+python-dotenv = "==1.0.1"
+aiofiles = "==24.1.0"
+
+[pypi-dependencies]
+jieba = "==0.42.1"
+pycryptodome = ">=3.19,<4"
+zstandard = ">=0.22,<1"
+mcp = ">=1.12,<2"

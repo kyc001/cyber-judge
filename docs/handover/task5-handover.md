@@ -124,7 +124,8 @@ These fields are produced by WeFlow and MUST be present in each message object:
 ### 2.6 Constraints
 
 - File must be valid JSON (UTF-8 encoding)
-- Max file size: 8MB (frontend limit, configurable in backend via `MAX_MESSAGES_PER_REQUEST`)
+- Max raw JSON upload size: 30MB (`MAX_UPLOAD_SIZE_MB`; frontend and backend guard)
+- Max parsed message count: `MAX_MESSAGES_PER_REQUEST` (backend default: 50,000)
 - Minimum 20 characters of content (frontend validation)
 - Messages are processed in `localId` order
 
@@ -176,7 +177,7 @@ SSE stream of LLM sub-call progress. Events:
 {"type": "done"}
 ```
 
-Steps: `hero` → `participants` + `quotes` (parallel) → `sections` → `predictions` → `chat_dna`
+Steps: `hero` → `participants` + `quotes` (parallel) → `sections` → `predictions` → `content_highlights` → `chat_dna`
 
 ### 3.4 POST /api/share/:id
 Create share link. Returns `{ slug, url, report }`.
@@ -192,15 +193,41 @@ Export report. Body: `{ report_id, format: "json"|"csv"|"txt"|"html"|"xlsx" }`.
 ## 4. Architecture Decisions
 
 ### 4.1 Multi-Call LLM (Not Monolithic)
-Instead of one giant prompt → one output, the pipeline makes 6 targeted sub-calls:
+Instead of one giant prompt → one output, the pipeline makes 7 targeted sub-calls:
 1. **hero** — title, tagline, hero block, tags
 2. **participants** — per-person roast + personality label (receives per-person message samples)
 3. **quotes** — real quotes extracted from 250 message samples (receives full transcript)
 4. **sections** — body text for each of the 17 report sections
 5. **predictions** — 3 predictions with probabilities
-6. **chat_dna** — 150-char Spotify Wrapped style paragraph
+6. **content_highlights** — content-level highlights backed by 2-4 real dialogue lines
+7. **chat_dna** — 150-char Spotify Wrapped style paragraph
 
 Calls 2 and 3 run in parallel via `asyncio.gather`. Each call has a focused system prompt and receives only the data relevant to its task.
+
+### 4.1.1 Content Highlights Contract
+
+`ReportPayload` can include `content_highlights`, rendered before the normal stats sections and inside the insights/quotes views.
+
+```ts
+interface DialogueLine {
+  sender: string;
+  text: string;
+  ts?: string;
+}
+
+interface ContentHighlight {
+  id: string;
+  title: string;
+  insight: string;
+  tag: string;
+  evidence: DialogueLine[];
+}
+```
+
+Rules:
+- `evidence[].text` must come from real chat messages, optionally truncated but not rewritten.
+- Each highlight should explain a content or relationship pattern, not repeat only counts.
+- The backend provides a rule-based fallback from selected high-signal windows when the LLM is unavailable.
 
 ### 4.2 JSON Repair
 LLM output is repaired before parsing: unclosed strings get closing quotes, unbalanced braces/brackets are balanced, markdown code fences are stripped. The extraction chain is: direct parse → repair → code fence extraction → brace extraction.

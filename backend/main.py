@@ -19,8 +19,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import traceback
-from collections import Counter, defaultdict
+from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -33,7 +34,7 @@ from database import get_report, get_share, init_db, insert_report, insert_share
 from fallback import generate_group_fallback, generate_relationship_fallback
 from llm_service import build_llm_input, call_llm, call_llm_multi, USE_MULTI_CALL
 from models import (
-    AnalyzeRequest, AnalyzeResponse, ExportRequest, ExportResponse,
+    AnalyzeRequest, AnalyzeResponse, ContentHighlight, DialogueLine, ExportRequest, ExportResponse,
     ReportPayload, ReportSection, QuoteItem, HeroBlock, ShareBlock, Prediction,
     SharePayload, new_id, now_iso,
 )
@@ -41,6 +42,9 @@ from prompts import build_group_roast_prompt, build_relationship_prompt, validat
 from stats import compute_stats
 
 load_dotenv()
+
+MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "30"))
+MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
 # ── App ──────────────────────────────────────────────────────────
 
@@ -181,6 +185,130 @@ def _stat_dict(item: object, *, by_alias: bool = False) -> dict:
         return item
     raise TypeError(f"Unsupported stat item type: {type(item).__name__}")
 
+
+def _message_dict(message: object) -> dict:
+    return {"sender": message.sender, "ts": message.ts, "content": message.content.strip()}
+
+
+def _message_score(message: object, index: int, total: int, keyword_set: set[str]) -> float:
+    content = message.content.strip()
+    score = 0.0
+    length = len(content)
+    if 8 <= length <= 80:
+        score += 3
+    elif 81 <= length <= 160:
+        score += 1.4
+    if re.search(r"[!?？！…~]{1,}", content):
+        score += 1.2
+    if re.search(r"(哈哈|笑死|救命|离谱|绝了|破防|绷不住|牛|草|啊|？|！)", content, re.I):
+        score += 2.4
+    if any(word and word in content for word in keyword_set):
+        score += 1.6
+    if 0 < index < total - 1:
+        score += 0.6
+    return score
+
+
+def _build_context_windows(messages: list, targets: list[tuple[int, object]], *, max_windows: int = 12) -> list[dict]:
+    windows: list[dict] = []
+    used_ranges: list[range] = []
+    for index, message in targets:
+        start = max(0, index - 1)
+        end = min(len(messages), index + 3)
+        current_range = range(start, end)
+        if any(set(current_range).intersection(existing) for existing in used_ranges):
+            continue
+        evidence = [
+            _message_dict(candidate)
+            for candidate in messages[start:end]
+            if candidate.type == "text" and candidate.content.strip()
+        ][:4]
+        if evidence:
+            windows.append({
+                "anchor_sender": message.sender,
+                "anchor_ts": message.ts,
+                "anchor": message.content.strip(),
+                "evidence": evidence,
+            })
+            used_ranges.append(current_range)
+        if len(windows) >= max_windows:
+            break
+    return windows
+
+
+def _select_llm_message_samples(messages: list, stats: object, *, max_samples: int = 180) -> list[dict]:
+    text_items = [
+        (index, message)
+        for index, message in enumerate(messages)
+        if message.type == "text" and 3 <= len(message.content.strip()) <= 220
+    ]
+    if not text_items:
+        return []
+
+    keyword_set = {item.word for item in stats.keywords[:20]}
+    scored = sorted(
+        text_items,
+        key=lambda item: _message_score(item[1], item[0], len(messages), keyword_set),
+        reverse=True,
+    )
+
+    selected_indices: set[int] = set()
+    selected: list[dict] = []
+
+    def add_window(center_index: int) -> None:
+        start = max(0, center_index - 1)
+        end = min(len(messages), center_index + 3)
+        for idx in range(start, end):
+            if idx in selected_indices:
+                continue
+            message = messages[idx]
+            if message.type != "text" or not message.content.strip():
+                continue
+            selected_indices.add(idx)
+            selected.append(_message_dict(message))
+
+    for index, _ in scored[:45]:
+        add_window(index)
+        if len(selected) >= max_samples:
+            break
+
+    sender_counts = Counter(message.sender for _, message in text_items)
+    for sender, _ in sender_counts.most_common(20):
+        per_sender = [item for item in text_items if item[1].sender == sender]
+        if not per_sender:
+            continue
+        for position in (0, len(per_sender) // 2, len(per_sender) - 1):
+            add_window(per_sender[position][0])
+            if len(selected) >= max_samples:
+                break
+        if len(selected) >= max_samples:
+            break
+
+    stride = max(1, len(text_items) // 24)
+    for index, _ in text_items[::stride]:
+        add_window(index)
+        if len(selected) >= max_samples:
+            break
+
+    selected.sort(key=lambda item: item.get("ts", ""))
+    return selected[:max_samples]
+
+
+def _build_highlight_windows(messages: list, stats: object) -> list[dict]:
+    text_items = [
+        (index, message)
+        for index, message in enumerate(messages)
+        if message.type == "text" and 6 <= len(message.content.strip()) <= 180
+    ]
+    keyword_set = {item.word for item in stats.keywords[:20]}
+    scored = sorted(
+        text_items,
+        key=lambda item: _message_score(item[1], item[0], len(messages), keyword_set),
+        reverse=True,
+    )
+    top_targets = scored[:20]
+    return _build_context_windows(messages, top_targets, max_windows=10)
+
 # ── Report processing ────────────────────────────────────────────
 
 async def _process_report(report_id: str, report_type: str, messages: list) -> None:
@@ -216,23 +344,8 @@ async def _process_report(report_id: str, report_type: str, messages: list) -> N
         recall_dict = stats.recall_stats if stats.recall_stats else None
         red_packet_dict = stats.red_packet_overview if stats.red_packet_overview else None
 
-        text_msgs = [m for m in messages if m.type == "text" and 3 <= len(m.content) <= 200]
-        sender_counts = Counter(m.sender for m in text_msgs)
-        top_senders = [s for s, _ in sender_counts.most_common(10)]
-        top_messages: list[dict] = []
-        seen_count: dict[str, int] = defaultdict(int)
-        for m in text_msgs:
-            if m.sender in top_senders and seen_count.get(m.sender, 0) < 15:
-                top_messages.append({"sender": m.sender, "ts": m.ts, "content": m.content})
-                seen_count[m.sender] = seen_count.get(m.sender, 0) + 1
-            if len(top_messages) >= 200:
-                break
-        for m in text_msgs:
-            if m.sender not in top_senders and seen_count.get(m.sender, 0) < 3:
-                top_messages.append({"sender": m.sender, "ts": m.ts, "content": m.content})
-                seen_count[m.sender] = seen_count.get(m.sender, 0) + 1
-            if len(top_messages) >= 250:
-                break
+        top_messages = _select_llm_message_samples(messages, stats)
+        highlight_windows = _build_highlight_windows(messages, stats)
 
         active_days: set[str] = set()
         for m in messages:
@@ -257,6 +370,7 @@ async def _process_report(report_id: str, report_type: str, messages: list) -> N
             famous_quotes=famous_quote_dicts, peak_day=peak_day_dict,
             annual_summary=annual_dict, recall_stats=recall_dict,
             red_packet_overview=red_packet_dict,
+            highlight_windows=highlight_windows,
         )
 
         llm_success = False
@@ -269,6 +383,7 @@ async def _process_report(report_id: str, report_type: str, messages: list) -> N
                     system_prompt="", user_message=llm_input,
                     participants=participants_dicts, message_samples=top_messages,
                     stats_input=llm_input, report_type=report_type,
+                    highlight_windows=highlight_windows,
                     progress_callback=_progress_cb,
                 )
             else:
@@ -296,9 +411,9 @@ async def _process_report(report_id: str, report_type: str, messages: list) -> N
         if not llm_success:
             top_names = [p.name for p in stats.participants]
             if report_type == "group_roast":
-                report = generate_group_fallback(stats, stats.participants, top_names)
+                report = generate_group_fallback(stats, stats.participants, top_names, highlight_windows)
             else:
-                report = generate_relationship_fallback(stats, stats.participants, top_names)
+                report = generate_relationship_fallback(stats, stats.participants, top_names, highlight_windows)
             report.report_id = report_id
 
         payload = report.model_dump(by_alias=True)
@@ -388,6 +503,42 @@ def _merge_llm_with_stats(llm_json: dict, stats: object, report_id: str, report_
             icon=q.get("icon", "sparkles"),
         ))
 
+    content_highlights: list[ContentHighlight] = []
+    for item in llm_json.get("content_highlights", []):
+        evidence: list[DialogueLine] = []
+        for line in item.get("evidence", [])[:4]:
+            text = line.get("text") or line.get("content") or ""
+            if not text:
+                continue
+            evidence.append(DialogueLine(
+                sender=line.get("sender", ""),
+                text=text,
+                ts=line.get("ts") or None,
+            ))
+        if not evidence:
+            continue
+        content_highlights.append(ContentHighlight(
+            id=item.get("id", f"h{len(content_highlights) + 1}"),
+            title=item.get("title", "真实对话亮点"),
+            insight=item.get("insight", ""),
+            tag=item.get("tag", "content"),
+            evidence=evidence,
+        ))
+
+    if not content_highlights and stats.famous_quotes:
+        for index, quote in enumerate(stats.famous_quotes[:3], start=1):
+            content_highlights.append(ContentHighlight(
+                id=f"h{index}",
+                title="算法抓到的名场面",
+                insight="这句话在长度、语气或情绪上都比普通消息更突出，适合作为 AI 二次点评的证据片段。",
+                tag="content",
+                evidence=[DialogueLine(
+                    sender=quote.get("sender", ""),
+                    text=quote.get("content", ""),
+                    ts=quote.get("ts") or None,
+                )],
+            ))
+
     hero_data = llm_json.get("hero", {})
     hero = HeroBlock(
         kicker=hero_data.get("kicker", "群聊人格样本"),
@@ -432,7 +583,8 @@ def _merge_llm_with_stats(llm_json: dict, stats: object, report_id: str, report_
         report_id=report_id, report_type=report_type, created_at=now_iso(),
         title=llm_json.get("title", "赛博判官报告"), tagline=llm_json.get("tagline", ""),
         hero=hero, tags=llm_json.get("tags", []),
-        sections=sections, quotes=quotes, stats=stats, share=share,
+        sections=sections, quotes=quotes, content_highlights=content_highlights,
+        stats=stats, share=share,
     )
 
 # ── Report endpoint ──────────────────────────────────────────────
@@ -499,7 +651,14 @@ async def get_share_endpoint(slug: str):
 # ── Upload (JSON only) ───────────────────────────────────────────
 
 from parser import parse_and_validate
-from wechat_importer import export_wechat_chat, get_wechat_prepare_status, list_wechat_chats, prepare_wechat_data
+from wechat_importer import (
+    export_wechat_chat,
+    get_wechat_prepare_status,
+    list_exported_chat_samples,
+    list_wechat_chats,
+    load_exported_chat_sample,
+    prepare_wechat_data,
+)
 import stats_extra
 
 
@@ -521,6 +680,8 @@ async def upload_and_analyze(req: dict):
 
     if not text.strip():
         raise HTTPException(400, "文本内容不能为空")
+    if len(text.encode("utf-8")) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(400, f"文件超过 {MAX_UPLOAD_SIZE_MB}MB")
 
     messages = parse_and_validate(text)
     if not messages:
@@ -559,6 +720,42 @@ async def list_wechat_chats_endpoint(
         raise HTTPException(503, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(500, f"读取微信会话失败: {exc}") from exc
+
+
+@app.get("/api/wechat/exported-chats")
+async def list_exported_chats_endpoint(
+    query: str = "",
+    kind: str = "all",
+    limit: int = 24,
+    min_size: int = 40 * 1024,
+    max_size: int = 180 * 1024,
+):
+    """List medium-sized exported JSON chats for fast local demo selection."""
+    try:
+        return list_exported_chat_samples(
+            query=query,
+            kind=kind,
+            limit=limit,
+            min_size=min_size,
+            max_size=max_size,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(500, f"读取导出样例失败: {exc}") from exc
+
+
+@app.get("/api/wechat/exported-chats/{file_name}")
+async def get_exported_chat_endpoint(file_name: str):
+    """Load one exported JSON chat file so the frontend can preview/analyze it."""
+    try:
+        return load_exported_chat_sample(file_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(500, f"读取导出样例失败: {exc}") from exc
 
 
 @app.get("/api/wechat/prepare")
