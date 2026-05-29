@@ -20,15 +20,18 @@ import asyncio
 import json
 import os
 import re
+import sys
 import traceback
 from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from database import get_report, get_share, init_db, insert_report, insert_share, update_report_error, update_report_payload
 from fallback import generate_group_fallback, generate_relationship_fallback
@@ -41,6 +44,10 @@ from models import (
 from prompts import build_group_roast_prompt, build_relationship_prompt, validate_llm_output
 from stats import compute_stats
 
+BACKEND_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = BACKEND_DIR.parent
+
+load_dotenv(BACKEND_DIR / ".env")
 load_dotenv()
 
 MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "30"))
@@ -880,6 +887,62 @@ def _build_html_export(report: ReportPayload) -> str:
     return f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>{report.title}</title><style>body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:800px;margin:0 auto;padding:2rem;background:#0f0f23;color:#e0e0e0}}h1{{font-size:2rem;color:#a78bfa}}.tagline{{color:#888;font-style:italic}}.tags{{margin:1rem 0}}.tag{{background:#2d2d5e;color:#a78bfa;padding:.2rem .8rem;border-radius:1rem;font-size:.85rem;margin-right:.5rem}}.hero{{text-align:center;padding:3rem 0;border-bottom:1px solid #2d2d5e;margin-bottom:2rem}}.hero .kicker{{color:#a78bfa;font-size:.9rem;text-transform:uppercase;letter-spacing:.1em}}.hero .quote{{font-size:1.3rem;color:#c4b5fd;font-style:italic;margin:1rem 0}}.section{{margin:2rem 0;padding:1.5rem;background:#1a1a2e;border-radius:.75rem}}.section h2{{color:#a78bfa;margin-top:0}}blockquote{{border-left:3px solid #a78bfa;padding-left:1rem;margin:1rem 0}}blockquote footer{{color:#888;font-size:.85rem;margin-top:.5rem}}.watermark{{text-align:center;color:#555;margin-top:3rem;padding-top:1rem;border-top:1px solid #2d2d5e}}</style></head><body><div class="hero"><div class="kicker">{report.hero.kicker}</div><h1>{report.title}</h1><p class="tagline">{report.tagline}</p><div class="quote">"{report.hero.quote}"</div><div class="tags">{tags_html}</div></div>{sections_html}<div class="quotes">{quotes_html}</div><div class="watermark">{report.share.watermark} · {report.created_at[:10]}</div></body></html>"""
 
 # ── Run ──────────────────────────────────────────────────────────
+
+def _frontend_dist_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    explicit = os.environ.get("CYBER_JUDGE_FRONTEND_DIST", "").strip()
+    if explicit:
+        candidates.append(Path(explicit))
+
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+        candidates.extend([
+            base / "frontend" / "dist",
+            base / "frontend_dist",
+            Path(sys.executable).resolve().parent / "frontend" / "dist",
+        ])
+
+    candidates.extend([
+        PROJECT_DIR / "frontend" / "dist",
+        BACKEND_DIR / "frontend_dist",
+    ])
+    return candidates
+
+
+def _resolve_frontend_dist() -> Path | None:
+    for candidate in _frontend_dist_candidates():
+        if (candidate / "index.html").exists():
+            return candidate.resolve()
+    return None
+
+
+FRONTEND_DIST_DIR = _resolve_frontend_dist()
+
+if FRONTEND_DIST_DIR is not None:
+    assets_dir = FRONTEND_DIST_DIR / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="frontend-assets")
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_frontend_app(full_path: str):
+    """Serve the production React app in desktop/static mode."""
+    if full_path == "api" or full_path.startswith("api/"):
+        raise HTTPException(404, "API route not found")
+
+    if FRONTEND_DIST_DIR is None:
+        raise HTTPException(404, "Frontend build assets not found. Run npm run build first.")
+
+    requested = (FRONTEND_DIST_DIR / full_path).resolve()
+    try:
+        requested.relative_to(FRONTEND_DIST_DIR)
+    except ValueError:
+        raise HTTPException(404, "File not found") from None
+
+    if requested.is_file():
+        return FileResponse(requested)
+    return FileResponse(FRONTEND_DIST_DIR / "index.html")
+
 
 if __name__ == "__main__":
     import uvicorn

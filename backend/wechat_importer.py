@@ -30,6 +30,23 @@ def _project_dir() -> Path:
     return Path(os.environ.get("WECHAT_DECRYPT_PROJECT_DIR", str(BUNDLED_WECHAT_DECRYPT_DIR)))
 
 
+def _code_dir() -> Path:
+    configured = os.environ.get("WECHAT_DECRYPT_CODE_DIR", "").strip()
+    if configured:
+        return Path(configured)
+    project_dir = _project_dir()
+    if (project_dir / "main.py").exists():
+        return project_dir
+    return BUNDLED_WECHAT_DECRYPT_DIR
+
+
+def _script_runner() -> list[str]:
+    runner = os.environ.get("CYBER_JUDGE_SCRIPT_RUNNER", "").strip()
+    if runner:
+        return [runner]
+    return [sys.executable]
+
+
 def _session_db_candidates(project_dir: Path) -> list[Path]:
     return [
         project_dir / "decrypted" / "session" / "session.db",
@@ -52,6 +69,10 @@ def get_wechat_prepare_status() -> dict[str, Any]:
 def prepare_wechat_data(*, force: bool = False) -> dict[str, Any]:
     """Run the bundled decrypt flow so Cyber Judge can list local WeChat chats."""
     project_dir = _project_dir()
+    code_dir = _code_dir()
+    if not code_dir.exists():
+        raise RuntimeError(f"未找到微信解密模块目录：{code_dir}")
+    project_dir.mkdir(parents=True, exist_ok=True)
     if not project_dir.exists():
         raise RuntimeError(f"未找到微信解密模块目录：{project_dir}")
 
@@ -62,8 +83,9 @@ def prepare_wechat_data(*, force: bool = False) -> dict[str, Any]:
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("WECHAT_DECRYPT_NONINTERACTIVE", "1")
+    env.setdefault("WECHAT_DECRYPT_APP_DIR", str(project_dir))
     timeout = int(os.environ.get("WECHAT_PREPARE_TIMEOUT_SECONDS", "600"))
-    cmd = [sys.executable, "main.py", "decrypt"]
+    cmd = [*_script_runner(), str(code_dir / "main.py"), "decrypt"]
     result = subprocess.run(
         cmd,
         cwd=str(project_dir),
@@ -93,13 +115,18 @@ def prepare_wechat_data(*, force: bool = False) -> dict[str, Any]:
 
 def _load_modules() -> WechatModules:
     project_dir = _project_dir()
+    code_dir = _code_dir()
+    if not code_dir.exists():
+        raise RuntimeError(f"未找到微信解密项目目录：{code_dir}。请设置 WECHAT_DECRYPT_CODE_DIR。")
+    project_dir.mkdir(parents=True, exist_ok=True)
     if not project_dir.exists():
         raise RuntimeError(
             f"未找到微信解密项目目录：{project_dir}。请设置 WECHAT_DECRYPT_PROJECT_DIR。"
         )
-    project_text = str(project_dir)
-    if project_text not in sys.path:
-        sys.path.insert(0, project_text)
+    os.environ.setdefault("WECHAT_DECRYPT_APP_DIR", str(project_dir))
+    code_text = str(code_dir)
+    if code_text not in sys.path:
+        sys.path.insert(0, code_text)
     try:
         export_all_chats = importlib.import_module("export_all_chats")
         mcp_server = importlib.import_module("mcp_server")

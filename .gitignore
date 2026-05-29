@@ -3,6 +3,8 @@ node_modules/
 
 # Frontend build/cache output
 dist/
+build/
+__pycache__/
 *.tsbuildinfo
 vite-dev.*.log
 

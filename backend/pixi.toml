@@ -7,6 +7,7 @@ version = "0.1.0"
 
 [tasks]
 start = "uvicorn main:app --reload --port 8000"
+desktop = "python ../desktop/cyber_judge_desktop.py --no-webview"
 
 [dependencies]
 python = ">=3.11,<3.14"
@@ -22,3 +23,4 @@ jieba = "==0.42.1"
 pycryptodome = ">=3.19,<4"
 zstandard = ">=0.22,<1"
 mcp = ">=1.12,<2"
+pyinstaller = ">=6.0"

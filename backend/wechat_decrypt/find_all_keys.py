@@ -7,7 +7,7 @@ import json
 import hashlib
 import multiprocessing
 import time
-from config import load_config
+from config import _config_file_path, load_config
 from Crypto.Cipher import AES
 
 
@@ -167,7 +167,7 @@ def find_image_key_offline(cfg):
         
         cfg['image_aes_key'] = aes_key
         cfg['image_xor_key'] = xor_key
-        config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+        config_file = _config_file_path()
         with open(config_file, 'w', encoding='utf-8') as f:
             json.dump(cfg, f, indent=4, ensure_ascii=False)
         print(f"[+] 已保存到 config.json")
