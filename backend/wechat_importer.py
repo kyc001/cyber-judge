@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import traceback
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +46,35 @@ def _script_runner() -> list[str]:
     if runner:
         return [runner]
     return [sys.executable]
+
+
+def _desktop_log_path() -> Path | None:
+    explicit = os.environ.get("CYBER_JUDGE_DESKTOP_LOG", "").strip()
+    if explicit:
+        return Path(explicit)
+    if os.environ.get("CYBER_JUDGE_DESKTOP") != "1":
+        return None
+    root = os.environ.get("CYBER_JUDGE_APP_DATA", "").strip()
+    if root:
+        return Path(root) / "desktop.log"
+    if os.name == "nt":
+        local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+        if local_app_data:
+            return Path(local_app_data) / "CyberJudge" / "desktop.log"
+    return None
+
+
+def _log_desktop_diagnostic(message: str) -> None:
+    log_path = _desktop_log_path()
+    if log_path is None:
+        return
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"{timestamp} {message}\n")
+    except OSError:
+        pass
 
 
 def _session_db_candidates(project_dir: Path) -> list[Path]:
@@ -131,6 +161,12 @@ def _load_modules() -> WechatModules:
         export_all_chats = importlib.import_module("export_all_chats")
         mcp_server = importlib.import_module("mcp_server")
     except Exception as exc:
+        _log_desktop_diagnostic(
+            "wechat_importer failed to import bundled modules\n"
+            f"code_dir={code_dir}\n"
+            f"project_dir={project_dir}\n"
+            + traceback.format_exc()
+        )
         raise RuntimeError(
             "无法加载微信解密项目。请确认已安装其 requirements.txt，且 config.json 已配置/解密完成。"
         ) from exc
@@ -340,7 +376,11 @@ def list_exported_chat_samples(
     """List medium-sized JSON exports for quick frontend demo selection."""
     exported_dir = _exported_chats_dir()
     if not exported_dir.exists():
-        raise RuntimeError(f"未找到导出的聊天目录：{exported_dir}")
+        return {
+            "directory": str(exported_dir),
+            "total": 0,
+            "chats": [],
+        }
 
     needle = query.strip().lower()
     allowed_kind = kind if kind in {"group", "single"} else "all"

@@ -86,6 +86,10 @@ Questions to answer:
 - `WECHAT_EXPORTED_CHATS_DIR`: writable exported-chat sample directory.
 - `CYBER_JUDGE_SCRIPT_RUNNER`: optional runner for subprocess script dispatch;
   packaged mode uses `sys.executable`.
+- User `.env` for the packaged app lives at `%LOCALAPPDATA%\CyberJudge\.env`
+  (and optionally next to the exe). The launcher loads it with
+  `load_dotenv(..., override=False)` before starting the backend so LLM and
+  other secrets reach the frozen backend without bundling them into the exe.
 
 ### 4. Validation & Error Matrix
 
@@ -98,6 +102,26 @@ Questions to answer:
   user-facing failure with the command output tail.
 - PyInstaller hidden import missing -> packaged health check fails and the spec
   must add the explicit hidden import.
+- Dynamic `wechat_decrypt` import missing stdlib/dependency modules -> packaged
+  `/api/wechat/chats` returns 503 and `desktop.log` must include the original
+  import traceback.
+- Missing `WECHAT_EXPORTED_CHATS_DIR` -> exported-chat sample endpoint returns
+  `{total: 0, chats: []}`; the main local import flow must still use
+  `/api/wechat/chats` and `/api/wechat/export`.
+- Missing `multiprocessing.freeze_support()` in the desktop entrypoint ->
+  packaged child processes fail with unrecognized `--multiprocessing-fork`
+  arguments.
+- `webview`/`pythonnet`/`clr_loader` not collected via `collect_all` in the spec
+  -> `import webview` fails in the frozen exe, `_open_webview` returns False, and
+  the launcher silently falls back to the browser (no embedded GUI window). The
+  desktop window appearing in source mode does not prove it is bundled, because
+  the `desktop` pixi task runs with `--no-webview`.
+- Frozen backend cannot read the bundled `backend/.env` (it lives in a temporary
+  `_MEIPASS` dir and secrets are not bundled) -> `LLM_API_KEY` is empty and
+  reports fall back to rule-based generation. The launcher must load a user
+  `.env` from the app data dir into `os.environ` before starting the backend.
+  A `401 Unauthorized` from the LLM endpoint means the key reached the backend
+  but is invalid/expired (a credential issue, not a packaging bug).
 
 ### 5. Good/Base/Bad Cases
 
@@ -116,6 +140,9 @@ Questions to answer:
 - Source launcher health check: start on a test port, assert `/api/health` 200,
   `/` 200 HTML, and unknown `/api/*` 404.
 - Packaged exe health check with the same assertions.
+- Packaged WeChat import smoke test after real or fixture decrypt data exists:
+  assert `/api/wechat/prepare` reports `decrypted=true`, then assert
+  `/api/wechat/chats?limit=3` returns 200 and a numeric `total`.
 - Packaged script dispatch check: run `CyberJudgeDesktop.exe main.py status`
   with a temporary `CYBER_JUDGE_APP_DATA` and assert the reported config path is
   under that runtime directory.
@@ -143,3 +170,53 @@ os.environ.setdefault("WECHAT_DECRYPT_APP_DIR", str(wechat_runtime_dir))
 
 Bundled code stays read-only; user data stays in the persistent app data
 directory.
+
+#### Wrong
+
+```python
+a = Analysis(..., pathex=[str(ROOT), str(BACKEND)], hiddenimports=["mcp"])
+datas.append((str(BACKEND / "wechat_decrypt" / "mcp_server.py"), "backend/wechat_decrypt"))
+```
+
+If `wechat_decrypt` scripts are only bundled as data, PyInstaller does not
+analyze their imports. Runtime imports can fail in the packaged exe even when
+source mode works.
+
+#### Correct
+
+```python
+WECHAT_DECRYPT = BACKEND / "wechat_decrypt"
+a = Analysis(
+    ...,
+    pathex=[str(ROOT), str(BACKEND), str(WECHAT_DECRYPT)],
+    hiddenimports=["export_all_chats", "mcp_server", "wave"],
+)
+```
+
+Dynamic script modules must be discoverable during PyInstaller analysis, and
+non-obvious hidden imports must be explicit.
+
+#### Wrong
+
+```python
+# pywebview added to deps, but the exe never shows a window.
+collected_packages = ("jieba", "uvicorn", "fastapi", "starlette", "pydantic")
+```
+
+`import webview` fails at runtime because the native WebView2/WebBrowserInterop
+DLLs and the pythonnet/clr backend are never bundled. The launcher catches the
+ImportError and silently opens the browser instead of the embedded GUI window.
+
+#### Correct
+
+```python
+collected_packages = (
+    "jieba", "uvicorn", "fastapi", "starlette", "pydantic",
+    "webview", "pythonnet", "clr_loader",
+)
+hiddenimports += ["clr", "webview.platforms.edgechromium", "webview.platforms.winforms"]
+```
+
+`collect_all` pulls the WebView2 runtime DLLs and pythonnet runtime so the
+EdgeChromium backend initializes in the frozen exe. Verify the embedded window
+opens from the packaged exe, not just from the `--no-webview` source task.

@@ -7,6 +7,7 @@ from PyInstaller.utils.hooks import collect_all
 
 ROOT = Path(SPECPATH).resolve().parent
 BACKEND = ROOT / "backend"
+WECHAT_DECRYPT = BACKEND / "wechat_decrypt"
 FRONTEND_DIST = ROOT / "frontend" / "dist"
 
 datas = [
@@ -64,7 +65,7 @@ wechat_decrypt_files = [
 ]
 
 for file_name in wechat_decrypt_files:
-    datas.append((str(BACKEND / "wechat_decrypt" / file_name), "backend/wechat_decrypt"))
+    datas.append((str(WECHAT_DECRYPT / file_name), "backend/wechat_decrypt"))
 
 binaries = []
 hiddenimports = [
@@ -91,9 +92,35 @@ hiddenimports = [
     "Crypto.Cipher.AES",
     "zstandard",
     "mcp",
+    "wave",
+    "export_all_chats",
+    "mcp_server",
+    "chat_export_helpers",
+    "config",
+    "decode_image",
+    "key_utils",
+    # pywebview Windows (EdgeChromium) backend chain
+    "clr",
+    "webview.platforms.edgechromium",
+    "webview.platforms.winforms",
+    "webview.platforms.mshtml",
+    "proxy_tools",
 ]
 
-for package in ("jieba", "uvicorn", "fastapi", "starlette", "pydantic"):
+# webview/pythonnet/clr_loader ship native DLLs (WebView2, WebBrowserInterop,
+# Python.Runtime) that PyInstaller only bundles via collect_all; without them
+# `import webview` fails in the frozen exe and the launcher silently falls back
+# to the browser instead of showing the embedded GUI window.
+for package in (
+    "jieba",
+    "uvicorn",
+    "fastapi",
+    "starlette",
+    "pydantic",
+    "webview",
+    "pythonnet",
+    "clr_loader",
+):
     collected = collect_all(package)
     datas += collected[0]
     binaries += collected[1]
@@ -102,7 +129,7 @@ for package in ("jieba", "uvicorn", "fastapi", "starlette", "pydantic"):
 
 a = Analysis(
     [str(ROOT / "desktop" / "cyber_judge_desktop.py")],
-    pathex=[str(ROOT), str(BACKEND)],
+    pathex=[str(ROOT), str(BACKEND), str(WECHAT_DECRYPT)],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,

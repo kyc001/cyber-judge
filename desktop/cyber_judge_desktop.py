@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import multiprocessing
 import os
 import runpy
 import socket
@@ -137,6 +138,26 @@ def _configure_environment(host: str, port: int) -> None:
     _log(f"wechat_project_dir={os.environ['WECHAT_DECRYPT_PROJECT_DIR']}")
 
 
+def _load_env_files() -> None:
+    """Inject a user .env into os.environ before the backend imports settings.
+
+    The frozen backend lives in a temporary bundle dir with no .env, so the
+    packaged exe cannot read the developer's backend/.env and LLM_API_KEY ends
+    up empty (reports fall back to rule-based). Load a persistent user .env from
+    the app data dir (preferred) and one next to the exe so the bundled backend
+    inherits the key. Existing real env vars always win (override=False).
+    """
+    try:
+        from dotenv import load_dotenv
+    except Exception as exc:
+        _log(f"dotenv unavailable, skipping .env load: {exc}")
+        return
+    for env_path in (_app_data_dir() / ".env", _runtime_dir() / ".env"):
+        if env_path.is_file():
+            load_dotenv(env_path, override=False)
+            _log(f"loaded env file: {env_path}")
+
+
 def _ensure_import_paths() -> None:
     backend_dir = _backend_dir()
     root_dir = _bundle_dir()
@@ -179,10 +200,11 @@ def _run_script_entrypoint() -> int:
     script_arg = sys.argv[1]
     for candidate in _script_candidates(script_arg):
         if candidate.exists():
-            sys.argv = [str(candidate), *sys.argv[2:]]
+            script_path = candidate.resolve()
+            sys.argv = [str(script_path), *sys.argv[2:]]
             work_dir = os.environ.get("WECHAT_DECRYPT_APP_DIR", "").strip()
-            os.chdir(work_dir or str(candidate.parent))
-            runpy.run_path(str(candidate), run_name="__main__")
+            os.chdir(work_dir or str(script_path.parent))
+            runpy.run_path(str(script_path), run_name="__main__")
             return 0
     raise FileNotFoundError(f"Bundled script not found: {script_arg}")
 
@@ -301,6 +323,7 @@ def main() -> int:
     args = parse_args()
     port = _find_available_port(args.port)
     _configure_environment(args.host, port)
+    _load_env_files()
     _start_backend(args.host, port)
 
     base_url = f"http://{args.host}:{port}"
@@ -323,6 +346,7 @@ def _show_fatal_error(message: str) -> None:
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     try:
         if len(sys.argv) > 1 and sys.argv[1].lower().endswith(".py"):
             raise SystemExit(_run_script_entrypoint())
