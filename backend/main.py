@@ -7,6 +7,9 @@ Endpoints:
   POST /api/share/:id       — Create a share link
   GET  /api/share/:slug     — Load a shared report
   POST /api/export          — Export report as json/csv/txt/html
+  GET  /api/llm/config      — Read local LLM provider/model state
+  POST /api/llm/config      — Save local LLM provider/model/key
+  POST /api/llm/test        — Test selected LLM connection
   GET  /api/health          — Health check
 
 Architecture: Upload -> Parser -> Stats -> LLM (multi-call) -> Merge -> Store
@@ -35,7 +38,15 @@ from fastapi.staticfiles import StaticFiles
 
 from database import get_report, get_share, init_db, insert_report, insert_share, update_report_error, update_report_payload
 from fallback import generate_group_fallback, generate_relationship_fallback
-from llm_service import build_llm_input, call_llm, call_llm_multi, USE_MULTI_CALL
+from llm_service import (
+    USE_MULTI_CALL,
+    build_llm_input,
+    call_llm,
+    call_llm_multi,
+    get_llm_config_for_api,
+    save_llm_config_from_api,
+    test_llm_config_from_api,
+)
 from models import (
     AnalyzeRequest, AnalyzeResponse, ContentHighlight, DialogueLine, ExportRequest, ExportResponse,
     ReportPayload, ReportSection, QuoteItem, HeroBlock, ShareBlock, Prediction,
@@ -47,8 +58,21 @@ from stats import compute_stats
 BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BACKEND_DIR.parent
 
-load_dotenv(BACKEND_DIR / ".env")
-load_dotenv()
+if os.environ.get("CYBER_JUDGE_DESKTOP") != "1":
+    load_dotenv(BACKEND_DIR / ".env")
+    load_dotenv()
+
+def _configure_piped_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if stream.isatty():
+                continue
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
+_configure_piped_stdio()
 
 MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "30"))
 MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
@@ -75,6 +99,8 @@ app.add_middleware(
 
 _progress_store: dict[str, dict] = {}
 _progress_events: dict[str, asyncio.Event] = {}
+_wechat_import_store: dict[str, dict] = {}
+_wechat_import_events: dict[str, asyncio.Event] = {}
 
 def _set_progress(report_id: str, step: str, status: str, error: str = ""):
     """Record a progress step and notify SSE listeners."""
@@ -94,12 +120,92 @@ def _finish_progress(report_id: str, success: bool):
     if report_id in _progress_events:
         _progress_events[report_id].set()
 
+
+def _set_wechat_import_progress(
+    import_id: str,
+    step: str,
+    status: str,
+    percent: int,
+    message: str = "",
+    error: str = "",
+):
+    """Record a local WeChat import step and notify SSE listeners."""
+    if import_id not in _wechat_import_store:
+        _wechat_import_store[import_id] = {"steps": [], "overall": "processing"}
+    _wechat_import_store[import_id]["steps"].append({
+        "step": step,
+        "status": status,
+        "percent": max(0, min(100, int(percent))),
+        "message": message,
+        "error": error,
+        "ts": now_iso(),
+    })
+    if import_id in _wechat_import_events:
+        _wechat_import_events[import_id].set()
+        _wechat_import_events[import_id].clear()
+
+
+def _finish_wechat_import(
+    import_id: str,
+    *,
+    success: bool,
+    report_id: str = "",
+    export: dict | None = None,
+    error: str = "",
+):
+    if import_id not in _wechat_import_store:
+        _wechat_import_store[import_id] = {"steps": [], "overall": "processing"}
+    _wechat_import_store[import_id]["overall"] = "done" if success else "error"
+    _wechat_import_store[import_id]["report_id"] = report_id
+    _wechat_import_store[import_id]["export"] = export or {}
+    _wechat_import_store[import_id]["error"] = error
+    if import_id in _wechat_import_events:
+        _wechat_import_events[import_id].set()
+    try:
+        asyncio.create_task(_cleanup_wechat_import_later(import_id))
+    except RuntimeError:
+        pass
+
+
+async def _cleanup_wechat_import_later(import_id: str, delay_seconds: int = 1800):
+    await asyncio.sleep(delay_seconds)
+    _wechat_import_events.pop(import_id, None)
+    _wechat_import_store.pop(import_id, None)
+
 # ── Health ───────────────────────────────────────────────────────
 
 @app.get("/api/health")
 async def health():
     """Health check endpoint."""
     return {"status": "ok", "timestamp": now_iso()}
+
+
+@app.get("/api/llm/config")
+async def llm_config():
+    """Return frontend-safe LLM configuration."""
+    return get_llm_config_for_api()
+
+
+@app.post("/api/llm/config")
+async def save_llm_config(req: dict):
+    """Persist local LLM provider/model/key settings."""
+    try:
+        return save_llm_config_from_api(req)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(500, f"保存模型配置失败: {exc}") from exc
+
+
+@app.post("/api/llm/test")
+async def test_llm_config(req: dict):
+    """Check whether the selected provider/model/key can answer."""
+    try:
+        return await test_llm_config_from_api(req)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, f"模型连通性检查失败: {exc}") from exc
 
 # ── SSE Progress ─────────────────────────────────────────────────
 
@@ -148,6 +254,68 @@ async def report_progress(report_id: str):
         event_stream(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/wechat/import/{import_id}/progress")
+async def wechat_import_progress(import_id: str):
+    if import_id not in _wechat_import_events:
+        _wechat_import_events[import_id] = asyncio.Event()
+
+    async def event_stream():
+        store = _wechat_import_store.get(import_id, {})
+        for step in store.get("steps", []):
+            yield f"data: {json.dumps({'type': 'progress', **step}, ensure_ascii=False)}\n\n"
+
+        sent_steps = len(store.get("steps", []))
+        overall = store.get("overall", "processing")
+        if overall in ("done", "error"):
+            yield f"data: {json.dumps({'type': overall, 'report_id': store.get('report_id', ''), 'export': store.get('export', {}), 'error': store.get('error', '')}, ensure_ascii=False)}\n\n"
+            _wechat_import_events.pop(import_id, None)
+            return
+
+        while True:
+            try:
+                await asyncio.wait_for(_wechat_import_events[import_id].wait(), timeout=30.0)
+            except asyncio.TimeoutError:
+                yield f"data: {json.dumps({'type': 'heartbeat'}, ensure_ascii=False)}\n\n"
+                continue
+
+            store = _wechat_import_store.get(import_id, {})
+            steps = store.get("steps", [])
+            overall = store.get("overall", "processing")
+
+            while sent_steps < len(steps):
+                step = steps[sent_steps]
+                yield f"data: {json.dumps({'type': 'progress', **step}, ensure_ascii=False)}\n\n"
+                sent_steps += 1
+
+            if overall in ("done", "error"):
+                yield f"data: {json.dumps({'type': overall, 'report_id': store.get('report_id', ''), 'export': store.get('export', {}), 'error': store.get('error', '')}, ensure_ascii=False)}\n\n"
+                break
+
+        _wechat_import_events.pop(import_id, None)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/wechat/import/{import_id}/json")
+async def download_wechat_import_json(import_id: str):
+    store = _wechat_import_store.get(import_id)
+    if not store or store.get("overall") != "done":
+        raise HTTPException(404, "导入任务不存在或尚未完成")
+    exported = store.get("export") or {}
+    export_path = str(exported.get("export_path", "") or "")
+    if not export_path or not Path(export_path).is_file():
+        raise HTTPException(404, "导出的 JSON 文件不存在")
+    return FileResponse(
+        export_path,
+        media_type="application/json",
+        filename=str(exported.get("filename") or Path(export_path).name),
     )
 
 # ── Analyze ──────────────────────────────────────────────────────
@@ -537,7 +705,7 @@ def _merge_llm_with_stats(llm_json: dict, stats: object, report_id: str, report_
             content_highlights.append(ContentHighlight(
                 id=f"h{index}",
                 title="算法抓到的名场面",
-                insight="这句话在长度、语气或情绪上都比普通消息更突出，适合作为 AI 二次点评的证据片段。",
+                insight="这句话在长度、语气或情绪上都比普通消息更突出，适合作为二次点评的证据片段。",
                 tag="content",
                 evidence=[DialogueLine(
                     sender=quote.get("sender", ""),
@@ -569,7 +737,7 @@ def _merge_llm_with_stats(llm_json: dict, stats: object, report_id: str, report_
         if not any(s.id == "predictions" for s in sections):
             sections.append(ReportSection(
                 id="predictions", type="predictions", heading="赛博占卜",
-                body="AI 基于数据趋势对群聊未来的预测。", chart_ref="predictions",
+                body="基于数据趋势对群聊未来的预测。", chart_ref="predictions",
             ))
 
     chat_dna_text = llm_json.get("chat_dna_text", "")
@@ -591,6 +759,7 @@ def _merge_llm_with_stats(llm_json: dict, stats: object, report_id: str, report_
         title=llm_json.get("title", "赛博判官报告"), tagline=llm_json.get("tagline", ""),
         hero=hero, tags=llm_json.get("tags", []),
         sections=sections, quotes=quotes, content_highlights=content_highlights,
+        insight_briefs=llm_json.get("insight_briefs", {}) if isinstance(llm_json.get("insight_briefs", {}), dict) else {},
         stats=stats, share=share,
     )
 
@@ -657,13 +826,11 @@ async def get_share_endpoint(slug: str):
 
 # ── Upload (JSON only) ───────────────────────────────────────────
 
-from parser import parse_and_validate
+from parser import parse_and_validate, parse_json_file
 from wechat_importer import (
     export_wechat_chat,
     get_wechat_prepare_status,
-    list_exported_chat_samples,
     list_wechat_chats,
-    load_exported_chat_sample,
     prepare_wechat_data,
 )
 import stats_extra
@@ -709,6 +876,7 @@ async def upload_and_analyze(req: dict):
 @app.get("/api/wechat/chats")
 async def list_wechat_chats_endpoint(
     query: str = "",
+    kind: str = "all",
     limit: int = 50,
     start_time: str = "",
     end_time: str = "",
@@ -717,6 +885,7 @@ async def list_wechat_chats_endpoint(
     try:
         return list_wechat_chats(
             query=query,
+            kind=kind,
             limit=limit,
             start_time=start_time,
             end_time=end_time,
@@ -727,42 +896,6 @@ async def list_wechat_chats_endpoint(
         raise HTTPException(503, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(500, f"读取微信会话失败: {exc}") from exc
-
-
-@app.get("/api/wechat/exported-chats")
-async def list_exported_chats_endpoint(
-    query: str = "",
-    kind: str = "all",
-    limit: int = 24,
-    min_size: int = 40 * 1024,
-    max_size: int = 180 * 1024,
-):
-    """List medium-sized exported JSON chats for fast local demo selection."""
-    try:
-        return list_exported_chat_samples(
-            query=query,
-            kind=kind,
-            limit=limit,
-            min_size=min_size,
-            max_size=max_size,
-        )
-    except RuntimeError as exc:
-        raise HTTPException(503, str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(500, f"读取导出样例失败: {exc}") from exc
-
-
-@app.get("/api/wechat/exported-chats/{file_name}")
-async def get_exported_chat_endpoint(file_name: str):
-    """Load one exported JSON chat file so the frontend can preview/analyze it."""
-    try:
-        return load_exported_chat_sample(file_name)
-    except FileNotFoundError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(500, f"读取导出样例失败: {exc}") from exc
 
 
 @app.get("/api/wechat/prepare")
@@ -786,6 +919,96 @@ async def prepare_wechat_endpoint(req: dict | None = None):
         raise HTTPException(500, f"准备微信数据库失败: {exc}") from exc
 
 
+@app.post("/api/wechat/import")
+async def start_wechat_import(req: dict):
+    """Start a local WeChat import task and stream progress over SSE."""
+    username = str(req.get("username", "")).strip()
+    if not username:
+        raise HTTPException(400, "请选择一个微信会话")
+
+    import_id = new_id()
+    _wechat_import_events[import_id] = asyncio.Event()
+    _wechat_import_store[import_id] = {"steps": [], "overall": "processing"}
+    _set_wechat_import_progress(import_id, "queued", "started", 3, "导入任务已创建")
+    asyncio.create_task(_process_wechat_import(import_id, req))
+    return {"import_id": import_id, "status": "processing", "estimated_seconds": 20}
+
+
+async def _process_wechat_import(import_id: str, req: dict):
+    username = str(req.get("username", "")).strip()
+    report_type = req.get("report_type", "group_roast")
+    anonymized = req.get("anonymized", True)
+    start_time = str(req.get("start_time", "") or "")
+    end_time = str(req.get("end_time", "") or "")
+    output_dir = str(req.get("output_dir", "") or "")
+    incremental = bool(req.get("incremental", True)) and not start_time and not end_time
+
+    try:
+        _set_wechat_import_progress(import_id, "export", "started", 12, "正在导出微信聊天")
+        exported = await asyncio.to_thread(
+            export_wechat_chat,
+            username=username,
+            start_time=start_time,
+            end_time=end_time,
+            output_dir=output_dir,
+            incremental=incremental,
+        )
+        export_path = exported.get("export_path", "")
+        if not export_path:
+            raise RuntimeError("导出完成但未找到 JSON 文件路径")
+        exported["filename"] = Path(export_path).name
+        _set_wechat_import_progress(
+            import_id,
+            "export",
+            "done",
+            48,
+            f"已导出 {int(exported.get('message_count') or 0):,} 条消息",
+        )
+
+        _set_wechat_import_progress(import_id, "parse", "started", 58, "正在解析聊天 JSON")
+        messages = await asyncio.to_thread(parse_json_file, export_path)
+        _set_wechat_import_progress(
+            import_id,
+            "parse",
+            "done",
+            72,
+            f"已解析 {len(messages):,} 条消息",
+        )
+
+        if anonymized:
+            _set_wechat_import_progress(import_id, "privacy", "started", 78, "正在处理昵称脱敏")
+            await asyncio.to_thread(_anonymize_messages, messages)
+            _set_wechat_import_progress(import_id, "privacy", "done", 82, "昵称脱敏完成")
+
+        _set_wechat_import_progress(import_id, "analysis", "started", 88, "正在创建分析任务")
+        from models import AnalyzeRequest, PrivacyConfig, ClientMeta
+        analyze_req = AnalyzeRequest(
+            report_type=report_type, source="wechat_decrypt_json",
+            messages=messages, privacy=PrivacyConfig(anonymized=anonymized),
+            client_meta=ClientMeta(),
+        )
+        response = await analyze(analyze_req)
+        payload = response.model_dump()
+        payload["export"] = exported
+        _set_wechat_import_progress(import_id, "analysis", "done", 96, "分析任务已创建")
+        _finish_wechat_import(
+            import_id,
+            success=True,
+            report_id=payload["report_id"],
+            export=exported,
+        )
+    except Exception as exc:
+        _set_wechat_import_progress(
+            import_id,
+            "error",
+            "error",
+            100,
+            "导入失败",
+            str(exc),
+        )
+        _finish_wechat_import(import_id, success=False, error=str(exc))
+
+
 @app.post("/api/wechat/export")
 async def export_wechat_and_analyze(req: dict):
     """Export one WeChat chat to JSON, parse it, and launch the existing analysis."""
@@ -797,19 +1020,29 @@ async def export_wechat_and_analyze(req: dict):
     anonymized = req.get("anonymized", True)
     start_time = str(req.get("start_time", "") or "")
     end_time = str(req.get("end_time", "") or "")
+    output_dir = str(req.get("output_dir", "") or "")
+    include_json = bool(req.get("include_json", False))
+    incremental = bool(req.get("incremental", True)) and not start_time and not end_time
 
     try:
         exported = export_wechat_chat(
             username=username,
             start_time=start_time,
             end_time=end_time,
+            output_dir=output_dir,
+            incremental=incremental,
         )
         export_path = exported.get("export_path", "")
         if not export_path:
             raise RuntimeError("导出完成但未找到 JSON 文件路径")
-        with open(export_path, "r", encoding="utf-8") as f:
-            text = f.read()
-        messages = parse_and_validate(text)
+        exported["filename"] = Path(export_path).name
+        if include_json:
+            with open(export_path, "r", encoding="utf-8") as f:
+                text = f.read()
+            exported["json_text"] = text
+            messages = parse_and_validate(text)
+        else:
+            messages = parse_json_file(export_path)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:
@@ -946,5 +1179,27 @@ async def serve_frontend_app(full_path: str):
 
 if __name__ == "__main__":
     import uvicorn
+
+    reload_exclude_roots = [
+        "data",
+        "imported_chats",
+        "wechat_decrypt/decrypted",
+        "wechat_decrypt/decoded_images",
+        "wechat_decrypt/exported_chats",
+        "wechat_decrypt/wxwork_decrypted",
+        "wechat_decrypt/wxwork_export",
+    ]
+    reload_excludes = [
+        pattern
+        for root in reload_exclude_roots
+        for pattern in (f"{root}/*", f"{root}/**/*")
+    ]
+    reload_excludes.extend([
+        "wechat_decrypt/config.json",
+        "wechat_decrypt/all_keys*.json",
+        "wechat_decrypt/wxwork_keys*.json",
+    ])
+
     uvicorn.run("main:app", host=os.environ.get("HOST", "0.0.0.0"),
-                port=int(os.environ.get("PORT", "8000")), reload=True)
+                port=int(os.environ.get("PORT", "8000")), reload=True,
+                reload_excludes=reload_excludes)

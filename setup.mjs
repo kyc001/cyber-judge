@@ -1,7 +1,7 @@
 import { spawnSync } from "child_process";
 import { existsSync, rmSync } from "fs";
-import { join } from "path";
-import { platform } from "os";
+import { delimiter, join } from "path";
+import { homedir, platform } from "os";
 
 const CWD = import.meta.dirname;
 const BACKEND = join(CWD, "backend");
@@ -9,6 +9,10 @@ const FRONTEND = join(CWD, "frontend");
 const WECHAT_DECRYPT = join(BACKEND, "wechat_decrypt");
 const VENV = join(BACKEND, "venv");
 const isWin = platform() === "win32";
+const PIXI_BIN_DIR = join(homedir(), ".pixi", "bin");
+const PIXI_EXE = isWin ? join(PIXI_BIN_DIR, "pixi.exe") : join(PIXI_BIN_DIR, "pixi");
+
+process.env.PATH = `${PIXI_BIN_DIR}${delimiter}${process.env.PATH || ""}`;
 
 const venvPython = isWin
   ? join(VENV, "Scripts", "python.exe")
@@ -49,6 +53,51 @@ function pythonVersion(cmd, args = []) {
     found: r.status === 0 || r.status === 2,
     version: (r.stdout || "").trim(),
   };
+}
+
+function findPixi() {
+  if (existsSync(PIXI_EXE)) return PIXI_EXE;
+  const r = isWin
+    ? capture("where", ["pixi"])
+    : capture("sh", ["-c", "command -v pixi"]);
+  if (r.status !== 0) return "";
+  const first = (r.stdout || "").split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  return first || "";
+}
+
+function installPixi() {
+  if (findPixi()) {
+    console.log("  existing Pixi installation found");
+    return;
+  }
+
+  console.log("  Pixi not found; installing Pixi package manager...");
+  if (isWin) {
+    run(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "irm -UseBasicParsing https://pixi.sh/install.ps1 | iex",
+      ],
+      { shell: false }
+    );
+  } else {
+    run("sh", ["-c", "curl -fsSL https://pixi.sh/install.sh | bash"], { shell: false });
+  }
+
+  if (!findPixi()) {
+    throw new Error(`Pixi was installed but not found. Add ${PIXI_BIN_DIR} to PATH, then rerun npm run setup.`);
+  }
+}
+
+function ensurePixiEnvironment() {
+  installPixi();
+  const pixi = findPixi();
+  run(pixi, ["--version"], { cwd: CWD, shell: false });
+  run(pixi, ["install", "--manifest-path", join("backend", "pixi.toml")], { cwd: CWD, shell: false });
 }
 
 function findPython() {
@@ -109,10 +158,10 @@ function ensureVenv() {
 
 console.log("=== Cyber Judge Setup ===\n");
 
-console.log("[1/3] Installing frontend dependencies...");
+console.log("[1/4] Installing frontend dependencies...");
 run("npm", ["install"], { cwd: FRONTEND });
 
-console.log("\n[2/3] Setting up Python virtual environment...");
+console.log("\n[2/4] Setting up Python virtual environment...");
 ensureVenv();
 run(venvPython, ["-m", "pip", "install", "--upgrade", "pip"], { cwd: BACKEND, shell: false });
 run(
@@ -121,7 +170,10 @@ run(
   { cwd: BACKEND, shell: false }
 );
 
-console.log("\n[3/3] Verifying...");
+console.log("\n[3/4] Setting up Pixi desktop packaging environment...");
+ensurePixiEnvironment();
+
+console.log("\n[4/4] Verifying...");
 run("node", ["-e", "require('react')"], { cwd: FRONTEND });
 if (!existsSync(join(WECHAT_DECRYPT, "export_all_chats.py"))) {
   throw new Error("bundled wechat_decrypt module is missing");
@@ -130,6 +182,11 @@ run(
   venvPython,
   ["-c", "import fastapi, uvicorn, httpx, jieba, mcp, Crypto, zstandard; print('backend OK')"],
   { cwd: BACKEND, shell: false }
+);
+run(
+  findPixi(),
+  ["run", "--manifest-path", join("backend", "pixi.toml"), "python", "-c", "import PyInstaller; print('pixi OK')"],
+  { cwd: CWD, shell: false }
 );
 
 console.log("\nSetup complete. Run: npm run dev");

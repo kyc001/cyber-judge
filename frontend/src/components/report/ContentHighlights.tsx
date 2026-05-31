@@ -24,7 +24,7 @@ function formatTime(ts?: string) {
 
 export function ContentHighlightsPanel({
   highlights,
-  title = "AI 从真实对话里抓到的亮点",
+  title = "从真实对话里抓到的亮点",
   intro = "不只看谁发得多，而是把高信息密度的对话片段拿出来，看看梗、关系和情绪是怎么在原话里出现的。",
   compact = false,
 }: ContentHighlightsPanelProps) {
@@ -34,7 +34,6 @@ export function ContentHighlightsPanel({
   return (
     <section className={`report-section content-highlight-section${compact ? " content-highlight-compact" : ""}`}>
       <div className="section-copy">
-        <p className="eyebrow">Dialogue Evidence</p>
         <h2>{title}</h2>
         <p>{intro}</p>
       </div>

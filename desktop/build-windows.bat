@@ -24,14 +24,17 @@ if errorlevel 1 (
     exit /b 1
 )
 
+set "PIXI_CMD="
 where pixi >nul 2>&1
-if errorlevel 1 (
-    echo [!] pixi is required. Install Pixi first, then rerun this script.
+if not errorlevel 1 set "PIXI_CMD=pixi"
+if not defined PIXI_CMD if exist "%USERPROFILE%\.pixi\bin\pixi.exe" set "PIXI_CMD=%USERPROFILE%\.pixi\bin\pixi.exe"
+if not defined PIXI_CMD (
+    echo [!] pixi is required. Run npm run setup first, then rerun this script.
     exit /b 1
 )
 
 echo [*] Packaging desktop app...
-pixi run --manifest-path backend\pixi.toml pyinstaller --noconfirm desktop\CyberJudgeDesktop.spec
+"%PIXI_CMD%" run --manifest-path backend\pixi.toml pyinstaller --noconfirm desktop\CyberJudgeDesktop.spec
 if errorlevel 1 (
     echo [!] Desktop packaging failed.
     exit /b 1

@@ -16,7 +16,12 @@ function autoStartBackend(): any {
     backend = spawn(pythonBin, ["main.py"], {
       cwd: backendDir,
       stdio: "pipe",
-      env: { ...process.env, PYTHONUNBUFFERED: "1" },
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: "1",
+        PYTHONIOENCODING: "utf-8",
+        PYTHONUTF8: "1",
+      },
     });
 
     backend.stdout?.on("data", (d: Buffer) => {

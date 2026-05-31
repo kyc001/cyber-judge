@@ -1114,6 +1114,8 @@ def export_one(username, output_dir, names, transcribe=False,
 
     if not messages:
         return False, 0, 0, "empty"
+    if incremental and not new_messages and os.path.isfile(out_path):
+        return True, len(messages), 0, None
 
     # ── 语音转录 ──────────────────────────────────────────────
     if transcribe:
@@ -1167,8 +1169,17 @@ def export_one(username, output_dir, names, transcribe=False,
     output["messages"] = messages
 
     os.makedirs(os.path.dirname(out_path) if os.path.dirname(out_path) else ".", exist_ok=True)
+    pretty_json = os.environ.get("WECHAT_EXPORT_PRETTY_JSON", "0").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(output, f, ensure_ascii=False, indent=2)
+        json.dump(
+            output,
+            f,
+            ensure_ascii=False,
+            indent=2 if pretty_json else None,
+            separators=None if pretty_json else (",", ":"),
+        )
     _update_export_index(
         output_dir, export_index, username, display_name, ctx["is_group"],
         out_path, output

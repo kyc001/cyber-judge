@@ -20,7 +20,13 @@ The desktop app is the recommended product direction for non-technical users. It
 
 ## Source-Mode Run
 
-This project uses Pixi for the backend runtime. Do not run the desktop backend with a random global Python environment.
+This project uses Pixi for the backend runtime. Run the root setup script first; it checks/installs Pixi and prepares the `backend/pixi.toml` environment.
+
+```powershell
+npm run setup
+```
+
+Do not run the desktop backend with a random global Python environment.
 
 Build frontend assets first:
 
@@ -72,7 +78,7 @@ The launcher sets these defaults unless already provided:
 - `CYBER_JUDGE_FRONTEND_DIST` to the built frontend directory
 - `SHARE_BASE_URL` and `CORS_ORIGINS` to the local desktop origin
 
-LLM provider settings still come from the existing backend environment variables or `.env` file.
+LLM provider/model/API key settings are managed in the frontend model settings panel and stored in the user's local app data directory. The packaged desktop app does not load `.env` files for LLM credentials.
 
 ## Notes
 

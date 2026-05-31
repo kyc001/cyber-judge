@@ -7,11 +7,15 @@ Status: [x] Done  [-] Removed  [ ] Planned
 ## A. Data Import & Parsing
 
 - [x] A1. WeFlow JSON export parsing (localType mapping: 1=text, 3/34/43=image, 47=emoji, 49=file, 10000=system)
-- [x] A2. Message type auto-detection (text/image/emoji/file/link/system/red_packet/transfer)
-- [x] A3. Anonymization / alias mapping (A同学, B同学, ...)
-- [-] A4. WeChat PC TXT export parsing (removed — JSON only)
-- [-] A5. Paste text input (removed — file upload only)
-- [-] A6. Mock/demo mode (removed — real backend always)
+- [x] A2. wechat-decrypt JSON parsing and local WeChat import
+- [x] A3. Message type auto-detection (text/image/emoji/file/link/system/red_packet/transfer)
+- [x] A4. Anonymization / alias mapping (A同学, B同学, ...)
+- [-] A5. WeChat PC TXT export parsing (removed — JSON only)
+- [x] A6. Paste JSON input
+- [-] A7. Mock/demo mode (removed — real backend always)
+- [x] A8. Optional JSON copy saving during local WeChat import
+- [x] A9. Local WeChat import progress stream
+- [x] A10. Large import optimizations (single-pass JSON parse, compact export JSON, incremental cache path)
 
 ## B. Core Stats Engine
 

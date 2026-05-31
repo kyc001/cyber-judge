@@ -1,22 +1,75 @@
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle, Brain, CalendarDays, FileText, HeartHandshake, Loader2,
-  MessageCircleMore, Quote, RefreshCw, Search, ShieldCheck, Sparkles, Wand2,
+  MessageCircleMore, Quote, RefreshCw, ShieldCheck, Sparkles, Wand2,
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  exportWechatChatForAnalysis,
-  getExportedChatSample,
-  getExportedChatSamples,
+  downloadWechatImportJson,
   getWechatChats,
+  getLlmConfig,
   prepareWechatData,
+  saveLlmConfig,
+  startWechatChatImport,
+  testLlmConfig,
   uploadRawChat,
 } from "../api/client";
 import { Button } from "../components/ui/Button";
-import type { ExportedChatSample, ReportType, WechatChatSummary } from "../contracts/report";
+import type {
+  LlmConfig,
+  LlmConfigUpdate,
+  LlmProviderOption,
+  ReportType,
+  WechatChatSummary,
+  WechatImportProgressEvent,
+} from "../contracts/report";
 
 const MAX_FILE_SIZE_MB = 30;
 const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+
+const DEFAULT_LLM_PROVIDERS: LlmProviderOption[] = [
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    models: ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
+    default_model: "deepseek-v4-pro",
+  },
+  {
+    id: "openai",
+    label: "OpenAI",
+    models: [
+      "gpt-5.5",
+      "gpt-5.4",
+      "gpt-5.4-mini",
+      "gpt-5.4-nano",
+      "gpt-5.2",
+      "gpt-4.1",
+      "gpt-4.1-mini",
+      "gpt-4o",
+      "gpt-4o-mini",
+    ],
+    default_model: "gpt-5.4-mini",
+  },
+  {
+    id: "qwen",
+    label: "通义千问",
+    models: [
+      "qwen3.7-max",
+      "qwen3.6-plus",
+      "qwen3.6-flash",
+      "qwen3.5-plus",
+      "qwen3.5-flash",
+      "qwen-plus",
+      "qwen-plus-latest",
+      "qwen-max",
+      "qwen-max-latest",
+      "qwen-turbo",
+      "qwen-turbo-latest",
+    ],
+    default_model: "qwen3.6-plus",
+  },
+];
 
 interface UploadPreview {
   error?: string;
@@ -30,6 +83,38 @@ interface UploadPreview {
 }
 
 type AnalysisIntent = "auto_roast" | "group_dynamics" | "relationship_lab" | "quote_mining";
+type WechatKind = "all" | "group" | "single";
+type ImportStep = { step: string; status: string; message?: string; error?: string };
+type LlmDraft = {
+  provider: string;
+  model: string;
+};
+type JsonSavePicker = (options: {
+  suggestedName?: string;
+  types?: { description: string; accept: Record<string, string[]> }[];
+}) => Promise<JsonFileHandle>;
+type JsonFileHandle = {
+  createWritable: () => Promise<{
+    write: (data: Blob) => Promise<void>;
+    close: () => Promise<void>;
+  }>;
+};
+type JsonSaveTarget = {
+  kind: "picker";
+  handle: JsonFileHandle;
+  filename: string;
+} | {
+  kind: "download";
+  filename: string;
+};
+type DesktopWindow = Window & {
+  pywebview?: {
+    api?: {
+      choose_directory?: () => Promise<string | string[] | null>;
+    };
+  };
+  showSaveFilePicker?: JsonSavePicker;
+};
 
 const ANALYSIS_INTENTS: {
   id: AnalysisIntent;
@@ -42,34 +127,34 @@ const ANALYSIS_INTENTS: {
   {
     id: "auto_roast",
     icon: Brain,
-    title: "AI 自主锐评",
-    body: "让 AI 先自己判断最值得吐槽、最值得截图、最像关系信号的地方。",
+    title: "综合分析",
+    body: "自动提取摘要、异常互动、代表片段和报告主题。",
     reportType: "group_roast",
-    chips: ["重点摘要", "异常信号", "自由发挥"],
+    chips: ["摘要", "异常互动", "代表片段"],
   },
   {
     id: "group_dynamics",
     icon: MessageCircleMore,
-    title: "群聊体检",
-    body: "看谁在控场、谁是龙王、群里有哪些共同暗号和人设分工。",
+    title: "群聊分析",
+    body: "统计成员活跃、接话关系、共同词汇和表情偏好。",
     reportType: "group_roast",
-    chips: ["龙王榜", "群人设", "互动图谱"],
+    chips: ["成员活跃", "互动关系", "共同词汇"],
   },
   {
     id: "relationship_lab",
     icon: HeartHandshake,
-    title: "好友关系",
-    body: "适合两人聊天，分析主动程度、回复节奏、关系温度和共同语言。",
+    title: "双人关系",
+    body: "分析双方消息量、主动程度、回复节奏和共同语言。",
     reportType: "relationship",
-    chips: ["主动程度", "关系温度", "里程碑"],
+    chips: ["消息占比", "回复节奏", "共同语言"],
   },
   {
     id: "quote_mining",
     icon: Quote,
-    title: "名场面挖掘",
-    body: "优先找真实原话、神奇接话和能做分享卡片的聊天片段。",
+    title: "片段提取",
+    body: "从原始聊天中挑出可引用的代表性对话。",
     reportType: "group_roast",
-    chips: ["真实金句", "截图时刻", "梗密度"],
+    chips: ["原话", "上下文", "时间"],
   },
 ];
 
@@ -95,22 +180,99 @@ const WECHAT_TYPE_LABELS: Record<string, string> = {
   recall: "撤回",
 };
 
-function formatBytes(value: number) {
-  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
-  return `${Math.round(value / 1024)} KB`;
-}
-
-function recommendedLabel(sample: ExportedChatSample) {
-  if (sample.message_count > 0) {
-    return `${sample.message_count.toLocaleString("zh-CN")} 条`;
-  }
-  return formatBytes(sample.byte_size);
-}
+const WECHAT_IMPORT_STEP_LABELS: Record<string, string> = {
+  queued: "创建任务",
+  export: "导出聊天",
+  parse: "解析 JSON",
+  privacy: "昵称脱敏",
+  analysis: "创建分析",
+  error: "导入失败",
+};
 
 function formatUnixTime(value: unknown) {
   const seconds = Number(value);
   if (!Number.isFinite(seconds) || seconds <= 0) return "";
   return new Date(seconds * 1000).toISOString().slice(0, 16).replace("T", " ");
+}
+
+function formatDateInput(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function isAbortError(caught: unknown) {
+  return caught instanceof Error && caught.name === "AbortError";
+}
+
+async function chooseDesktopDirectory() {
+  const chooseDirectory = (window as DesktopWindow).pywebview?.api?.choose_directory;
+  if (!chooseDirectory) return "";
+  const selected = await chooseDirectory();
+  if (Array.isArray(selected)) return String(selected[0] || "");
+  return String(selected || "");
+}
+
+async function prepareJsonSaveTarget(filename: string): Promise<JsonSaveTarget> {
+  const safeName = filename || "wechat-chat.json";
+  const savePicker = (window as DesktopWindow).showSaveFilePicker;
+  if (!savePicker) return { kind: "download", filename: safeName };
+  try {
+    const handle = await savePicker({
+      suggestedName: safeName,
+      types: [{ description: "JSON 文件", accept: { "application/json": [".json"] } }],
+    });
+    return { kind: "picker", handle, filename: safeName };
+  } catch (caught) {
+    if (isAbortError(caught)) throw caught;
+    return { kind: "download", filename: safeName };
+  }
+}
+
+async function saveJsonToTarget(filename: string, jsonText: string, target: JsonSaveTarget | null) {
+  const safeName = filename || target?.filename || "wechat-chat.json";
+  const blob = new Blob([jsonText], { type: "application/json;charset=utf-8" });
+  if (target?.kind === "picker") {
+    const writable = await target.handle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    return;
+  }
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = safeName;
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function providerOptions(config: LlmConfig | null) {
+  return config?.providers?.length ? config.providers : DEFAULT_LLM_PROVIDERS;
+}
+
+function providerById(providers: LlmProviderOption[], provider: string) {
+  return providers.find((item) => item.id === provider) ?? providers[0] ?? DEFAULT_LLM_PROVIDERS[0];
+}
+
+function defaultModelForProvider(providers: LlmProviderOption[], provider: string) {
+  const option = providerById(providers, provider);
+  return option.default_model || option.models[0] || "";
+}
+
+function modelOptionsForProvider(providers: LlmProviderOption[], provider: string) {
+  return providerById(providers, provider).models;
+}
+
+function keyTailForProvider(config: LlmConfig | null, provider: string) {
+  const state = config?.provider_keys?.[provider];
+  if (state?.has_api_key) return state.api_key_tail;
+  if (config?.provider === provider && config.has_api_key) return config.api_key_tail;
+  return "";
 }
 
 function buildUploadPreview(raw: string): UploadPreview | null {
@@ -187,6 +349,7 @@ export function UploadPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const importSourceRef = useRef<EventSource | null>(null);
   const initialReportType: ReportType =
     searchParams.get("type") === "relationship" ? "relationship" : "group_roast";
   const [reportType, setReportType] = useState<ReportType>(initialReportType);
@@ -199,8 +362,12 @@ export function UploadPage() {
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [wechatQuery, setWechatQuery] = useState("");
+  const [wechatKind, setWechatKind] = useState<WechatKind>(
+    initialReportType === "relationship" ? "single" : "group",
+  );
   const [wechatStart, setWechatStart] = useState("");
   const [wechatEnd, setWechatEnd] = useState("");
+  const [saveWechatJson, setSaveWechatJson] = useState(false);
   const [wechatChats, setWechatChats] = useState<WechatChatSummary[]>([]);
   const [selectedWechat, setSelectedWechat] = useState("");
   const [wechatError, setWechatError] = useState("");
@@ -209,20 +376,68 @@ export function UploadPage() {
   const [isPreparingWechat, setIsPreparingWechat] = useState(false);
   const [wechatPrepareMessage, setWechatPrepareMessage] = useState("");
   const [isWechatSubmitting, setIsWechatSubmitting] = useState(false);
-  const [sampleQuery, setSampleQuery] = useState("");
-  const [sampleKind, setSampleKind] = useState<"all" | "group" | "single">("all");
-  const [sampleChats, setSampleChats] = useState<ExportedChatSample[]>([]);
-  const [sampleTotal, setSampleTotal] = useState(0);
-  const [selectedSample, setSelectedSample] = useState("");
-  const [sampleError, setSampleError] = useState("");
-  const [isLoadingSamples, setIsLoadingSamples] = useState(false);
-  const [isLoadingSampleFile, setIsLoadingSampleFile] = useState(false);
+  const [wechatImportProgress, setWechatImportProgress] = useState(0);
+  const [wechatImportCap, setWechatImportCap] = useState(46);
+  const [wechatImportMessage, setWechatImportMessage] = useState("");
+  const [wechatImportSteps, setWechatImportSteps] = useState<ImportStep[]>([]);
+  const [llmConfig, setLlmConfig] = useState<LlmConfig | null>(null);
+  const [llmDraft, setLlmDraft] = useState<LlmDraft>({
+    provider: DEFAULT_LLM_PROVIDERS[0].id,
+    model: DEFAULT_LLM_PROVIDERS[0].default_model,
+  });
+  const [llmApiKey, setLlmApiKey] = useState("");
+  const [llmStatus, setLlmStatus] = useState("");
+  const [isSavingLlm, setIsSavingLlm] = useState(false);
+  const [isTestingLlm, setIsTestingLlm] = useState(false);
   const preview = useMemo(() => buildUploadPreview(text), [text]);
   const activeIntent = ANALYSIS_INTENTS.find((intent) => intent.id === analysisIntent) ?? ANALYSIS_INTENTS[0];
+  const llmProviders = useMemo(() => providerOptions(llmConfig), [llmConfig]);
+  const llmModels = useMemo(
+    () => modelOptionsForProvider(llmProviders, llmDraft.provider),
+    [llmDraft.provider, llmProviders],
+  );
+  const llmSavedTail = keyTailForProvider(llmConfig, llmDraft.provider);
+
+  useEffect(() => () => importSourceRef.current?.close(), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getLlmConfig()
+      .then((config) => {
+        if (cancelled) return;
+        setLlmConfig(config);
+        setLlmDraft({ provider: config.provider, model: config.model });
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setLlmStatus(caught instanceof Error ? caught.message : "读取模型配置失败");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isWechatSubmitting) return undefined;
+    const timer = window.setInterval(() => {
+      setWechatImportProgress((current) => Math.min(wechatImportCap, current + 1));
+    }, 900);
+    return () => window.clearInterval(timer);
+  }, [isWechatSubmitting, wechatImportCap]);
+
+  function updateWechatImportStep(step: ImportStep) {
+    setWechatImportSteps((previous) => {
+      const next = previous.filter((item) => item.step !== step.step);
+      return [...next, step];
+    });
+  }
 
   function selectAnalysisIntent(intent: (typeof ANALYSIS_INTENTS)[number]) {
     setAnalysisIntent(intent.id);
     setReportType(intent.reportType);
+    setWechatKind(intent.reportType === "relationship" ? "single" : "group");
+    setSelectedWechat("");
   }
 
   function selectReportType(nextType: ReportType) {
@@ -230,37 +445,51 @@ export function UploadPage() {
     setAnalysisIntent(nextType === "relationship" ? "relationship_lab" : "group_dynamics");
   }
 
-  async function loadExportedSamples(nextKind = sampleKind, nextQuery = sampleQuery) {
-    setSampleError("");
-    setIsLoadingSamples(true);
+  function selectLlmProvider(provider: string) {
+    const model = defaultModelForProvider(llmProviders, provider);
+    setLlmDraft({ provider, model });
+    setLlmApiKey("");
+    setLlmStatus("");
+  }
+
+  function buildLlmPayload(): LlmConfigUpdate {
+    const payload: LlmConfigUpdate = {
+      provider: llmDraft.provider,
+      model: llmDraft.model,
+    };
+    const apiKey = llmApiKey.trim();
+    if (apiKey) payload.api_key = apiKey;
+    return payload;
+  }
+
+  async function handleSaveLlmConfig() {
+    setLlmStatus("");
+    setIsSavingLlm(true);
     try {
-      const response = await getExportedChatSamples({
-        query: nextQuery,
-        kind: nextKind,
-        limit: 18,
-      });
-      setSampleChats(response.chats);
-      setSampleTotal(response.total);
-      if (response.chats[0]) {
-        setSelectedSample((current) =>
-          current && response.chats.some((chat) => chat.file_name === current)
-            ? current
-            : response.chats[0].file_name,
-        );
-      } else {
-        setSelectedSample("");
-      }
+      const config = await saveLlmConfig(buildLlmPayload());
+      setLlmConfig(config);
+      setLlmDraft({ provider: config.provider, model: config.model });
+      setLlmApiKey("");
+      setLlmStatus(config.has_api_key ? "模型配置已保存" : "已保存模型选择，API Key 仍未填写");
     } catch (caught) {
-      setSampleError(caught instanceof Error ? caught.message : "读取导出样例失败。");
+      setLlmStatus(caught instanceof Error ? caught.message : "保存模型配置失败");
     } finally {
-      setIsLoadingSamples(false);
+      setIsSavingLlm(false);
     }
   }
 
-  useEffect(() => {
-    void loadExportedSamples("all", "");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  async function handleTestLlmConfig() {
+    setLlmStatus("");
+    setIsTestingLlm(true);
+    try {
+      const result = await testLlmConfig(buildLlmPayload());
+      setLlmStatus(result.ok ? `连通性正常：${result.model}` : "模型返回异常");
+    } catch (caught) {
+      setLlmStatus(caught instanceof Error ? caught.message : "模型连通性检查失败");
+    } finally {
+      setIsTestingLlm(false);
+    }
+  }
 
   async function readFile(file: File) {
     setError("");
@@ -276,27 +505,6 @@ export function UploadPage() {
     setText(await file.text());
   }
 
-  async function handleLoadSelectedSample(fileName = selectedSample) {
-    if (!fileName) {
-      setSampleError("请先选择一个导出样例。");
-      return;
-    }
-    setSampleError("");
-    setError("");
-    setIsLoadingSampleFile(true);
-    try {
-      const payload = await getExportedChatSample(fileName);
-      setSelectedSample(payload.file_name);
-      setFileName(payload.file_name);
-      setText(payload.text);
-      selectReportType(payload.kind === "single" ? "relationship" : "group_roast");
-    } catch (caught) {
-      setSampleError(caught instanceof Error ? caught.message : "载入导出样例失败。");
-    } finally {
-      setIsLoadingSampleFile(false);
-    }
-  }
-
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (file) void readFile(file);
@@ -308,27 +516,67 @@ export function UploadPage() {
     if (file) void readFile(file);
   }
 
-  async function handleLoadWechatChats() {
+  async function handleLoadWechatChats(overrides: Partial<{
+    query: string;
+    kind: WechatKind;
+    startTime: string;
+    endTime: string;
+  }> = {}) {
     setWechatError("");
     setIsLoadingWechat(true);
+    const nextQuery = overrides.query ?? wechatQuery;
+    const nextKind = overrides.kind ?? wechatKind;
+    const nextStart = overrides.startTime ?? wechatStart;
+    const nextEnd = overrides.endTime ?? wechatEnd;
     try {
       const response = await getWechatChats({
-        query: wechatQuery,
+        query: nextQuery,
+        kind: nextKind,
         limit: 80,
-        startTime: wechatStart,
-        endTime: wechatEnd,
+        startTime: nextStart,
+        endTime: nextEnd,
       });
       setWechatChats(response.chats);
       setWechatTotal(response.total);
-      if (response.chats[0] && !selectedWechat) {
+      const selectedStillVisible = response.chats.some((chat) => chat.username === selectedWechat);
+      if (response.chats[0] && (!selectedWechat || !selectedStillVisible)) {
         setSelectedWechat(response.chats[0].username);
         selectReportType(response.chats[0].kind === "single" ? "relationship" : "group_roast");
+      } else if (!response.chats.length) {
+        setSelectedWechat("");
       }
     } catch (caught) {
-      setWechatError(caught instanceof Error ? caught.message : "读取微信会话失败。");
+      setWechatError(caught instanceof Error ? caught.message : "读取微信失败。");
     } finally {
       setIsLoadingWechat(false);
     }
+  }
+
+  function applyWechatKind(nextKind: WechatKind) {
+    setWechatKind(nextKind);
+    setSelectedWechat("");
+    if (nextKind === "group") selectReportType("group_roast");
+    if (nextKind === "single") selectReportType("relationship");
+    void handleLoadWechatChats({ kind: nextKind });
+  }
+
+  function applyWechatRange(days: number | null) {
+    if (days === null) {
+      setWechatStart("");
+      setWechatEnd("");
+      setSelectedWechat("");
+      void handleLoadWechatChats({ startTime: "", endTime: "" });
+      return;
+    }
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - days + 1);
+    const nextStart = formatDateInput(start);
+    const nextEnd = formatDateInput(end);
+    setWechatStart(nextStart);
+    setWechatEnd(nextEnd);
+    setSelectedWechat("");
+    void handleLoadWechatChats({ startTime: nextStart, endTime: nextEnd });
   }
 
   async function handlePrepareWechatData() {
@@ -357,18 +605,90 @@ export function UploadPage() {
       return;
     }
     setIsWechatSubmitting(true);
+    setWechatImportProgress(2);
+    setWechatImportCap(46);
+    setWechatImportMessage("正在创建导入任务");
+    setWechatImportSteps([]);
+    importSourceRef.current?.close();
     try {
-      const response = await exportWechatChatForAnalysis({
+      const hasDesktopDirectoryPicker = Boolean((window as DesktopWindow).pywebview?.api?.choose_directory);
+      const outputDir = saveWechatJson && hasDesktopDirectoryPicker ? await chooseDesktopDirectory() : "";
+      const jsonSaveTarget = saveWechatJson && !outputDir
+        ? await prepareJsonSaveTarget("wechat-chat.json")
+        : null;
+      const started = await startWechatChatImport({
         username: selectedWechat,
         reportType,
         anonymized,
         startTime: wechatStart,
         endTime: wechatEnd,
+        outputDir,
       });
-      navigate(`/analyzing?reportId=${response.report_id}`);
+      setWechatImportProgress(6);
+      setWechatImportMessage("导入任务已提交");
+      const source = new EventSource(`${API_BASE}/api/wechat/import/${started.import_id}/progress`);
+      importSourceRef.current = source;
+      source.onmessage = async (event) => {
+        try {
+          const data = JSON.parse(event.data) as WechatImportProgressEvent;
+          if (data.type === "progress" && data.step) {
+            const percent = Number(data.percent || 0);
+            if (Number.isFinite(percent) && percent > 0) {
+              setWechatImportProgress((current) => Math.max(current, Math.min(99, percent)));
+              setWechatImportCap((current) => Math.min(99, Math.max(percent + 8, current)));
+            }
+            setWechatImportMessage(data.message || WECHAT_IMPORT_STEP_LABELS[data.step] || "正在导入");
+            updateWechatImportStep({
+              step: data.step,
+              status: data.status || "started",
+              message: data.message,
+              error: data.error,
+            });
+          }
+          if (data.type === "done" && data.report_id) {
+            source.close();
+            importSourceRef.current = null;
+            setWechatImportProgress(100);
+            setWechatImportMessage("导入完成，正在进入分析页");
+            if (saveWechatJson && !outputDir) {
+              try {
+                setWechatImportMessage("正在保存 JSON 副本");
+                const exportedJson = await downloadWechatImportJson(started.import_id);
+                await saveJsonToTarget(exportedJson.filename, exportedJson.text, jsonSaveTarget);
+              } catch (saveError) {
+                if (!isAbortError(saveError)) throw saveError;
+              }
+            }
+            navigate(`/analyzing?reportId=${data.report_id}`);
+          }
+          if (data.type === "error") {
+            source.close();
+            importSourceRef.current = null;
+            setIsWechatSubmitting(false);
+            setWechatError(data.error || "导入或分析失败。");
+          }
+        } catch (caught) {
+          source.close();
+          importSourceRef.current = null;
+          setIsWechatSubmitting(false);
+          setWechatError(caught instanceof Error ? caught.message : "导入进度解析失败。");
+        }
+      };
+      source.onerror = () => {
+        source.close();
+        importSourceRef.current = null;
+        setIsWechatSubmitting(false);
+        setWechatError("导入进度连接中断，请重试。");
+      };
     } catch (caught) {
-      setWechatError(caught instanceof Error ? caught.message : "导出或分析失败。");
-    } finally {
+      if (isAbortError(caught)) {
+        setIsWechatSubmitting(false);
+        setWechatImportMessage("");
+        setWechatImportSteps([]);
+        setWechatImportProgress(0);
+        return;
+      }
+      setWechatError(caught instanceof Error ? caught.message : "导入或分析失败。");
       setIsWechatSubmitting(false);
     }
   }
@@ -403,12 +723,12 @@ export function UploadPage() {
       <section className="upload-layout">
         <form className="upload-panel" onSubmit={handleSubmit}>
           <div className="section-copy">
-            <p className="eyebrow">Import / Intent</p>
-            <h1>先告诉 AI 你想看哪种聊天真相</h1>
-            <p>选择一个分析意图，再从本地微信、导出样例或手动 JSON 进入分析。</p>
+            <p className="eyebrow">导入与分析</p>
+            <h1>选择聊天记录和分析类型</h1>
+            <p>优先从本机微信导入，也可以手动上传 JSON。</p>
           </div>
 
-          <div className="analysis-intent-grid" role="radiogroup" aria-label="选择 AI 分析意图">
+          <div className="analysis-intent-grid" role="radiogroup" aria-label="选择分析类型">
             {ANALYSIS_INTENTS.map((intent) => {
               const Icon = intent.icon;
               const active = analysisIntent === intent.id;
@@ -436,156 +756,48 @@ export function UploadPage() {
             <button
               aria-checked={reportType === "group_roast"}
               className={`type-option ${reportType === "group_roast" ? "type-option-active" : ""}`}
-              onClick={() => selectReportType("group_roast")}
+              onClick={() => {
+                setSelectedWechat("");
+                setWechatKind("group");
+                selectReportType("group_roast");
+              }}
               role="radio" type="button"
             >
               <MessageCircleMore size={20} />
-              <strong>群聊锐评</strong>
-              <span>龙王榜、群人设、名场面</span>
+              <strong>群聊报告</strong>
+              <span>成员、互动、语言、表情</span>
             </button>
             <button
               aria-checked={reportType === "relationship"}
               className={`type-option ${reportType === "relationship" ? "type-option-active" : ""}`}
-              onClick={() => selectReportType("relationship")}
+              onClick={() => {
+                setSelectedWechat("");
+                setWechatKind("single");
+                selectReportType("relationship");
+              }}
               role="radio" type="button"
             >
               <HeartHandshake size={20} />
-              <strong>双人关系</strong>
-              <span>主动程度、共同语言、关系金句</span>
+              <strong>双人报告</strong>
+              <span>主动、节奏、共同语言</span>
             </button>
-          </div>
-
-          <div className="sample-import-panel">
-            <div className="sample-import-head">
-              <div>
-                <p className="eyebrow">Exported Cases</p>
-                <h2>挑一个中等样例先跑</h2>
-              </div>
-              <button
-                className="icon-action"
-                disabled={isLoadingSamples}
-                onClick={() => loadExportedSamples()}
-                title="刷新样例"
-                type="button"
-              >
-                {isLoadingSamples ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
-              </button>
-            </div>
-            <div className="sample-toolbar">
-              <label>
-                <Search size={16} />
-                <input
-                  onChange={(event) => setSampleQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void loadExportedSamples(sampleKind, sampleQuery);
-                    }
-                  }}
-                  placeholder="搜群名、联系人或活动名"
-                  value={sampleQuery}
-                />
-              </label>
-              <div className="sample-kind-tabs" role="radiogroup" aria-label="样例类型">
-                {([
-                  ["all", "全部"],
-                  ["group", "群聊"],
-                  ["single", "单聊"],
-                ] as const).map(([kind, label]) => (
-                  <button
-                    aria-checked={sampleKind === kind}
-                    className={sampleKind === kind ? "sample-kind-active" : ""}
-                    key={kind}
-                    onClick={() => {
-                      setSampleKind(kind);
-                      void loadExportedSamples(kind, sampleQuery);
-                    }}
-                    role="radio"
-                    type="button"
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="sample-summary">
-              <span>推荐 40KB-180KB，适合快速预览和调 UI</span>
-              {sampleTotal ? <strong>{sampleTotal} 个匹配</strong> : null}
-            </div>
-            {sampleChats.length ? (
-              <div className="sample-chat-list">
-                {sampleChats.map((sample) => (
-                  <button
-                    className={`sample-chat-row ${selectedSample === sample.file_name ? "sample-chat-row-active" : ""}`}
-                    key={sample.file_name}
-                    onClick={() => {
-                      setSelectedSample(sample.file_name);
-                      selectReportType(sample.kind === "single" ? "relationship" : "group_roast");
-                      void handleLoadSelectedSample(sample.file_name);
-                    }}
-                    type="button"
-                  >
-                    <span>
-                      <strong>{sample.display_name}</strong>
-                      <small>{sample.kind === "group" ? "群聊" : "单聊"} · {sample.file_name}</small>
-                    </span>
-                    <span>
-                      <strong>{recommendedLabel(sample)}</strong>
-                      <small>{formatBytes(sample.byte_size)} · {sample.date_first_msg ? `${sample.date_first_msg.slice(0, 10)} ~ ${sample.date_last_msg.slice(0, 10)}` : "时间未知"}</small>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p className="muted" style={{ margin: 0 }}>
-                {isLoadingSamples ? "正在读取样例..." : "没有匹配的中等样例，可以换个关键词或直接拖入 JSON。"}
-              </p>
-            )}
-            {sampleError ? <p className="error-text"><AlertCircle size={18} />{sampleError}</p> : null}
-            {isLoadingSampleFile ? <p className="muted" style={{ margin: 0 }}>正在载入选中的 JSON...</p> : null}
           </div>
 
           <div className="wechat-import-panel">
             <div className="wechat-import-head">
               <div>
-                <p className="eyebrow">Local WeChat</p>
-                <h2>从本机微信选择聊天</h2>
+                <p className="eyebrow">本机微信</p>
+                <h2>自动读取微信聊天</h2>
               </div>
               <button
                 className="icon-action"
                 disabled={isLoadingWechat || isPreparingWechat}
-                onClick={handleLoadWechatChats}
-                title="刷新会话"
+                onClick={() => handleLoadWechatChats()}
+                title="刷新列表"
                 type="button"
               >
                 {isLoadingWechat ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
               </button>
-            </div>
-            <div className="wechat-filters">
-              <label>
-                <Search size={16} />
-                <input
-                  onChange={(event) => setWechatQuery(event.target.value)}
-                  placeholder="联系人、群名或 wxid"
-                  value={wechatQuery}
-                />
-              </label>
-              <label>
-                <CalendarDays size={16} />
-                <input
-                  onChange={(event) => setWechatStart(event.target.value)}
-                  placeholder="开始时间 2025-01-01"
-                  value={wechatStart}
-                />
-              </label>
-              <label>
-                <CalendarDays size={16} />
-                <input
-                  onChange={(event) => setWechatEnd(event.target.value)}
-                  placeholder="结束时间，可留空"
-                  value={wechatEnd}
-                />
-              </label>
             </div>
             <div className="wechat-actions">
               <button
@@ -596,10 +808,85 @@ export function UploadPage() {
               >
                 {isPreparingWechat ? "准备中" : "准备微信数据"}
               </button>
-              <button className="inline-link" disabled={isLoadingWechat || isPreparingWechat} onClick={handleLoadWechatChats} type="button">
+              <button className="inline-link" disabled={isLoadingWechat || isPreparingWechat} onClick={() => handleLoadWechatChats()} type="button">
                 {isLoadingWechat ? "读取中" : "读取会话"}
               </button>
-              {wechatTotal ? <span className="muted">匹配 {wechatTotal} 个会话</span> : null}
+              {wechatTotal ? <span className="muted">共 {wechatTotal} 个会话</span> : null}
+            </div>
+            <div className="wechat-actions">
+              {([
+                ["group", "群聊"],
+                ["single", "单聊"],
+                ["all", "全部"],
+              ] as const).map(([kind, label]) => (
+                <button
+                  aria-pressed={wechatKind === kind}
+                  className="inline-link"
+                  key={kind}
+                  onClick={() => applyWechatKind(kind)}
+                  type="button"
+                >
+                  {wechatKind === kind ? `✓ ${label}` : label}
+                </button>
+              ))}
+              <button className="inline-link" onClick={() => applyWechatRange(30)} type="button">近30天</button>
+              <button className="inline-link" onClick={() => applyWechatRange(90)} type="button">近90天</button>
+              <button className="inline-link" onClick={() => applyWechatRange(null)} type="button">全部时间</button>
+            </div>
+            <div className="wechat-filters">
+              <label>
+                <MessageCircleMore size={16} />
+                <span className="muted">会话</span>
+                <input
+                  onChange={(event) => setWechatQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void handleLoadWechatChats({ query: event.currentTarget.value });
+                    }
+                  }}
+                  placeholder={wechatKind === "single" ? "联系人或 wxid" : "群名或 chatroom id"}
+                  value={wechatQuery}
+                />
+              </label>
+              <label>
+                <CalendarDays size={16} />
+                <span className="muted">开始</span>
+                <input
+                  onChange={(event) => setWechatStart(event.target.value)}
+                  type="date"
+                  placeholder="开始日期 2025-01-01"
+                  value={wechatStart}
+                />
+              </label>
+              <label>
+                <CalendarDays size={16} />
+                <span className="muted">结束</span>
+                <input
+                  onChange={(event) => setWechatEnd(event.target.value)}
+                  type="date"
+                  placeholder="结束日期，可留空"
+                  value={wechatEnd}
+                />
+              </label>
+            </div>
+            <div className="upload-options">
+              <label className="toggle-row">
+                <input
+                  checked={anonymized}
+                  onChange={(event) => setAnonymized(event.target.checked)}
+                  type="checkbox"
+                />
+                <span><ShieldCheck size={18} />默认脱敏昵称</span>
+              </label>
+              <label className="toggle-row">
+                <input
+                  checked={saveWechatJson}
+                  onChange={(event) => setSaveWechatJson(event.target.checked)}
+                  type="checkbox"
+                />
+                <span><FileText size={18} />导入时选择位置保存 JSON 副本</span>
+              </label>
             </div>
 
             {wechatPrepareMessage ? (
@@ -624,7 +911,7 @@ export function UploadPage() {
                     </span>
                     <span>
                       <strong>{chat.message_count.toLocaleString("zh-CN")}</strong>
-                      <small>{chat.first_time ? `${chat.first_time.slice(0, 10)} ~ ${chat.last_time.slice(0, 10)}` : "无匹配消息"}</small>
+                      <small>{chat.first_time ? `${chat.first_time.slice(0, 10)} ~ ${chat.last_time.slice(0, 10)}` : "该时间段无消息"}</small>
                     </span>
                   </button>
                 ))}
@@ -635,90 +922,190 @@ export function UploadPage() {
               <p className="error-text"><AlertCircle size={18} />{wechatError}</p>
             ) : null}
 
+            {isWechatSubmitting ? (
+              <div style={{ display: "grid", gap: 10 }}>
+                <div className="progress-shell" style={{ margin: 0 }}>
+                  <div className="progress-bar" style={{ width: `${wechatImportProgress}%` }} />
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <span className="muted">{wechatImportMessage || "正在导入聊天记录"}</span>
+                  <span className="progress-label">{wechatImportProgress}%</span>
+                </div>
+                {wechatImportSteps.length ? (
+                  <div style={{ display: "grid", gap: 6 }}>
+                    {wechatImportSteps.map((item) => (
+                      <div key={item.step} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                        <span>{WECHAT_IMPORT_STEP_LABELS[item.step] || item.step}</span>
+                        <span className="muted">
+                          {item.status === "done" ? "完成" : item.status === "error" ? "失败" : "进行中"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             <Button
               disabled={isWechatSubmitting || isPreparingWechat || !selectedWechat}
               icon={isWechatSubmitting ? <Loader2 className="spin" size={18} /> : <Wand2 size={18} />}
               onClick={handleWechatSubmit}
               type="button"
             >
-              {isWechatSubmitting ? "导出中" : "导出并分析"}
+              {isWechatSubmitting ? "导入中" : saveWechatJson ? "导入、保存并分析" : "导入并分析"}
             </Button>
           </div>
 
-          <input
-            accept=".json,application/json"
-            hidden
-            onChange={handleFileChange}
-            ref={inputRef}
-            type="file"
-          />
-
-          <label
-            className="drop-zone"
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={handleDrop}
-          >
-            <FileText size={30} />
-            <strong>{fileName || "拖拽 .json 文件到这里"}</strong>
-            <span>或点击选择文件，最大 {MAX_FILE_SIZE_MB}MB</span>
-            <button
-              className="inline-link"
-              onClick={() => inputRef.current?.click()}
-              type="button"
-            >
-              选择文件
-            </button>
-          </label>
-
-          <label className="textarea-label">
-            <span>或直接粘贴 JSON 文本</span>
-            <textarea
-              onChange={(event) => setText(event.target.value)}
-              placeholder="在此粘贴 WeFlow 或微信解密导出的 JSON 内容..."
-              value={text}
+          <div className="wechat-import-panel">
+            <div className="wechat-import-head">
+              <div>
+                <p className="eyebrow">手动 JSON</p>
+                <h2>上传或粘贴聊天 JSON</h2>
+              </div>
+            </div>
+            <input
+              accept=".json,application/json"
+              hidden
+              onChange={handleFileChange}
+              ref={inputRef}
+              type="file"
             />
-          </label>
 
-          <div className="upload-options">
-            <label className="toggle-row">
-              <input
-                checked={anonymized}
-                onChange={(event) => setAnonymized(event.target.checked)}
-                type="checkbox"
-              />
-              <span><ShieldCheck size={18} />默认脱敏昵称</span>
+            <label
+              className="drop-zone"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={handleDrop}
+            >
+              <FileText size={30} />
+              <strong>{fileName || "拖拽 JSON 文件到这里"}</strong>
+              <span>也可以选择文件，最大 {MAX_FILE_SIZE_MB}MB</span>
+              <button
+                className="inline-link"
+                onClick={() => inputRef.current?.click()}
+                type="button"
+              >
+                选择文件
+              </button>
             </label>
+
+            <label className="textarea-label">
+              <span>粘贴 JSON 文本</span>
+              <textarea
+                onChange={(event) => setText(event.target.value)}
+                placeholder="粘贴 WeFlow 或微信导出的 JSON 内容..."
+                value={text}
+              />
+            </label>
+
+            <div className="upload-options">
+              <label className="toggle-row">
+                <input
+                  checked={anonymized}
+                  onChange={(event) => setAnonymized(event.target.checked)}
+                  type="checkbox"
+                />
+                <span><ShieldCheck size={18} />默认脱敏昵称</span>
+              </label>
+            </div>
+
+            {error ? (
+              <p className="error-text">
+                <AlertCircle size={18} />{error}
+              </p>
+            ) : null}
+
+            <Button
+              disabled={isSubmitting}
+              icon={isSubmitting ? <Loader2 className="spin" size={18} /> : <Wand2 size={18} />}
+              type="submit"
+            >
+              {isSubmitting ? "提交中" : "分析 JSON"}
+            </Button>
           </div>
-
-          {error ? (
-            <p className="error-text">
-              <AlertCircle size={18} />{error}
-            </p>
-          ) : null}
-
-          <Button
-            disabled={isSubmitting}
-            icon={isSubmitting ? <Loader2 className="spin" size={18} /> : <Wand2 size={18} />}
-            type="submit"
-          >
-            {isSubmitting ? "提交中" : "分析手动 JSON"}
-          </Button>
         </form>
 
         <aside className="tutorial-panel">
           <div className="ai-brief-panel">
-            <p className="eyebrow">AI Brief</p>
+            <p className="eyebrow">当前选择</p>
             <h2>{activeIntent.title}</h2>
             <p>{activeIntent.body}</p>
             <div className="ai-brief-list">
-              <span><Sparkles size={16} /> 先给“最值得看”的结论</span>
-              <span><MessageCircleMore size={16} /> 再拆时间、语言、互动、情绪</span>
-              <span><Quote size={16} /> 最后挑可分享的真实金句</span>
+              <span><Sparkles size={16} /> 读取聊天记录</span>
+              <span><MessageCircleMore size={16} /> 统计消息、时间、成员与互动</span>
+              <span><Quote size={16} /> 生成中间页和最终报告</span>
             </div>
+          </div>
+          <div className="llm-settings-panel">
+            <div className="llm-settings-head">
+              <div>
+                <p className="eyebrow">模型设置</p>
+                <h2>选择报告生成模型</h2>
+              </div>
+              <span className={`llm-key-state ${llmSavedTail ? "llm-key-ready" : ""}`}>
+                {llmSavedTail ? `已保存 · ${llmSavedTail}` : "未填写 Key"}
+              </span>
+            </div>
+            <div className="llm-provider-grid" role="radiogroup" aria-label="选择模型服务商">
+              {llmProviders.map((provider) => (
+                <button
+                  aria-checked={llmDraft.provider === provider.id}
+                  className={`llm-provider-option ${llmDraft.provider === provider.id ? "llm-provider-active" : ""}`}
+                  key={provider.id}
+                  onClick={() => selectLlmProvider(provider.id)}
+                  role="radio"
+                  type="button"
+                >
+                  <span>{provider.label}</span>
+                  {keyTailForProvider(llmConfig, provider.id) ? <small>Key 已保存</small> : <small>待填写</small>}
+                </button>
+              ))}
+            </div>
+            <label className="llm-field">
+              <span>模型</span>
+              <select
+                onChange={(event) => setLlmDraft((current) => ({ ...current, model: event.target.value }))}
+                value={llmDraft.model}
+              >
+                {llmModels.map((model) => (
+                  <option key={model} value={model}>{model}</option>
+                ))}
+              </select>
+            </label>
+            <label className="llm-field">
+              <span>API Key</span>
+              <input
+                autoComplete="off"
+                onChange={(event) => setLlmApiKey(event.target.value)}
+                placeholder={llmSavedTail ? "不填则继续使用已保存 Key" : "粘贴当前服务商的 API Key"}
+                type="password"
+                value={llmApiKey}
+              />
+            </label>
+            <div className="llm-actions">
+              <Button
+                disabled={isSavingLlm}
+                icon={isSavingLlm ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
+                onClick={handleSaveLlmConfig}
+                type="button"
+                variant="secondary"
+              >
+                保存
+              </Button>
+              <Button
+                disabled={isTestingLlm}
+                icon={isTestingLlm ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+                onClick={handleTestLlmConfig}
+                type="button"
+                variant="ghost"
+              >
+                测试
+              </Button>
+            </div>
+            {llmStatus ? <p className="llm-status">{llmStatus}</p> : null}
           </div>
           {preview ? (
             <>
-              <p className="eyebrow">Data Preview</p>
+              <p className="eyebrow">数据预览</p>
               <h2>上传前预检</h2>
               {preview.error ? (
                 <p className="error-text"><AlertCircle size={18} />{preview.error}</p>
@@ -736,7 +1123,7 @@ export function UploadPage() {
                   </div>
                   <p className="muted" style={{ margin: 0 }}>时间范围：{preview.dateRange}</p>
                   <p className="muted" style={{ margin: 0 }}>
-                    建议模式：{preview.recommendedType === "relationship" ? "双人关系" : "群聊锐评"}
+                    建议模式：{preview.recommendedType === "relationship" ? "双人报告" : "群聊报告"}
                     {preview.recommendedType !== reportType ? "，可在左侧切换" : ""}
                   </p>
                   <div>
@@ -769,12 +1156,12 @@ export function UploadPage() {
             </>
           ) : (
             <>
-              <p className="eyebrow">Setup</p>
-              <h2>本机微信导入</h2>
+              <p className="eyebrow">本机微信导入</p>
+              <h2>使用步骤</h2>
               <ol>
-                <li>先在 wechat-decrypt 项目完成数据库解密</li>
-                <li>点击读取会话，按联系人、群名和时间范围筛选</li>
-                <li>选择会话后直接导出 JSON 并进入分析</li>
+                <li>准备微信数据后读取会话</li>
+                <li>按会话、类型和时间筛选</li>
+                <li>选择会话后导入并分析</li>
               </ol>
             </>
           )}

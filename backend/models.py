@@ -345,6 +345,7 @@ class ReportPayload(BaseModel):
     sections: list[ReportSection]
     quotes: list[QuoteItem]
     content_highlights: list[ContentHighlight] = Field(default_factory=list)
+    insight_briefs: dict[str, str] = Field(default_factory=dict)
     stats: ReportStats
     share: ShareBlock
 

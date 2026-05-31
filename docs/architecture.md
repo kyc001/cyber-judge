@@ -2,7 +2,7 @@
 
 ## Overview
 
-Cyber Judge is a WeChat chat analysis and AI-powered report generation platform. It takes WeFlow JSON exports, performs 45+ statistical analyses, enriches with a multi-call LLM pipeline, and renders an interactive report with 19 section types and 25+ chart components.
+Cyber Judge is a WeChat chat analysis and AI-powered report generation platform. It imports local WeChat chats or JSON exports, performs 45+ statistical analyses, enriches them with a multi-call LLM pipeline, and renders intermediate theme pages before the final report.
 
 ## Architecture Diagram
 
@@ -27,7 +27,12 @@ Cyber Judge is a WeChat chat analysis and AI-powered report generation platform.
                                   ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                     API LAYER (FastAPI + Uvicorn)                     │
-│  POST /api/upload          — Upload WeFlow JSON, start analysis      │
+│  POST /api/upload          — Upload JSON, start analysis             │
+│  POST /api/wechat/prepare  — Prepare local WeChat data               │
+│  GET  /api/wechat/chats    — List local WeChat sessions              │
+│  POST /api/wechat/import   — Start selected WeChat import task       │
+│  GET  /api/wechat/import/:id/progress — Import progress stream       │
+│  GET  /api/wechat/import/:id/json — Download imported JSON           │
 │  GET  /api/report/:id      — Get report (202 while processing)       │
 │  GET  /api/report/:id/progress — SSE stream of LLM sub-call progress │
 │  POST /api/share/:id       — Create share link                       │
@@ -42,7 +47,8 @@ Cyber Judge is a WeChat chat analysis and AI-powered report generation platform.
 │ STATS ENGINE │    │   LLM SERVICE    │    │    PARSER        │
 │              │    │                  │    │                  │
 │ stats.py     │    │ Multi-call:      │    │ parser.py        │
-│ stats_extra  │    │  hero+tags       │    │ (WeFlow JSON)    │
+│ stats_extra  │    │  hero+tags       │    │ (WeFlow/wechat   │
+│              │    │                  │    │  JSON)           │
 │              │    │  participants    │    │                  │
 │ 45+ stats    │    │  quotes          │    │ Message types:   │
 │ dimensions   │    │  sections        │    │ text/image/emoji │
@@ -74,7 +80,7 @@ cyber-judge/
 │   ├── main.py              # FastAPI app (all endpoints)
 │   ├── models.py            # Pydantic data models (40+ types)
 │   ├── database.py          # SQLite persistence (WAL mode)
-│   ├── parser.py            # WeFlow JSON parser
+│   ├── parser.py            # WeFlow and wechat-decrypt JSON parser
 │   ├── stats.py             # Core stats engine (45+ dimensions)
 │   ├── stats_extra.py       # Supplementary stats
 │   ├── llm_service.py       # Multi-provider LLM with multi-call pipeline
@@ -101,7 +107,7 @@ cyber-judge/
 ## Data Flow
 
 ```
-WeFlow JSON → Parser → ChatMessage[] → Stats Engine → ReportStats
+Local WeChat / JSON → Parser → ChatMessage[] → Stats Engine → ReportStats
                                                ↓
                                         LLM Service (multi-call)
                                         ┌─────────────────────┐
@@ -138,11 +144,11 @@ After analysis, the frontend enters the first theme page directly and advances t
 | 消息结构 | `echotrace`, `WechatExporter` | Message type breakdown and evolution for text, image, emoji, file, link, recall, red packet |
 | 关系走势 | `relationship-candlestick-lab`, `WeFlow DualReport` | Monthly interaction trend, balance by message counts, milestones, first-chat replay |
 | 名场面回放 | `ChatLab`, `whatsapp-wrapped-v3` | Real quote extraction, memorable moments, first conversation replay |
-| 赛博占卜 | `PromptFill`, existing LLM pipeline | Pattern-based predictions, personality badges, LLM-generated short interpretation on every theme page |
+| 趋势预测 | `PromptFill`, existing LLM pipeline | Pattern-based predictions, personality badges, LLM-generated short interpretation on every theme page |
 
 ## Key Design Decisions
 
-1. **JSON-only input** — WeFlow JSON format only, backend handles parsing and validation
+1. **Local-first input** — Local WeChat import is the main path; WeFlow and wechat-decrypt JSON remain supported
 2. **Multi-call LLM** — 7 targeted sub-calls (hero, participants, quotes, sections, predictions, content_highlights, chat_dna) for higher quality than a single monolithic prompt
 3. **SSE progress** — Server-Sent Events stream real-time sub-call progress to the frontend
 4. **JSON repair** — Truncated LLM output is repaired before parsing (close strings, balance braces/brackets, strip code fences)

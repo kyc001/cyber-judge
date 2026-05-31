@@ -57,6 +57,8 @@ _STOP_WORDS: set[str] = {
 
 # Catches ALL bracket patterns: [xxx], [xxx yyy], etc.
 _WECHAT_BRACKET_RE = re.compile(r"\[[^\]]+\]")
+_REPLY_QUOTE_RE = re.compile(r"[\r\n]+\s*(?:↳\s*)?回复\b[\s\S]*$", re.S)
+_INLINE_QUOTE_RE = re.compile(r"\[引用[^\]\r\n]*\][\s\S]*$", re.S)
 
 # These bracket patterns are media indicators, not emoji stickers
 _NON_EMOJI_BRACKETS = frozenset({
@@ -176,8 +178,14 @@ def _emoji_label_from_meta(caption: object, url: object = "", md5: object = "") 
 
     return ""
 
+def _strip_reply_quote(content: str) -> str:
+    text = content or ""
+    text = _REPLY_QUOTE_RE.sub("", text)
+    text = _INLINE_QUOTE_RE.sub("", text)
+    return text
+
 def _extract_emojis(content: str) -> list[str]:
-    raw = _STICKER_NAME_RE.findall(content)
+    raw = _STICKER_NAME_RE.findall(_strip_reply_quote(content))
     return [_normalize_emoji_label(r) for r in raw if r not in _NON_EMOJI_BRACKETS]
 
 def _extract_message_emojis(msg: ChatMessage) -> list[tuple[str, str]]:
@@ -195,7 +203,7 @@ def _extract_urls(content: str) -> list[str]:
 
 def _tokenize(text: str) -> list[str]:
     # Strip ALL bracket patterns and quoted-reply markers
-    clean = _WECHAT_BRACKET_RE.sub(" ", text)
+    clean = _WECHAT_BRACKET_RE.sub(" ", _strip_reply_quote(text))
     clean = re.sub(r"[「【].*?[」】]", " ", clean)
     words = jieba.lcut(clean)
     result: list[str] = []

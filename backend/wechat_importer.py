@@ -18,7 +18,6 @@ from typing import Any
 BACKEND_DIR = Path(__file__).resolve().parent
 BUNDLED_WECHAT_DECRYPT_DIR = BACKEND_DIR / "wechat_decrypt"
 DEFAULT_IMPORT_DIR = BACKEND_DIR / "imported_chats"
-DEFAULT_EXPORTED_CHATS_DIR = BUNDLED_WECHAT_DECRYPT_DIR / "exported_chats"
 
 
 @dataclass(frozen=True)
@@ -39,6 +38,54 @@ def _code_dir() -> Path:
     if (project_dir / "main.py").exists():
         return project_dir
     return BUNDLED_WECHAT_DECRYPT_DIR
+
+
+def _configure_wechat_project(project_dir: Path) -> None:
+    os.environ["WECHAT_DECRYPT_APP_DIR"] = str(project_dir)
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _unload_wechat_decrypt_modules(code_dir: Path) -> None:
+    removed = False
+    for name, module in list(sys.modules.items()):
+        module_file = getattr(module, "__file__", None)
+        if not module_file:
+            continue
+        if _path_is_within(Path(module_file), code_dir):
+            sys.modules.pop(name, None)
+            removed = True
+    if removed:
+        importlib.invalidate_caches()
+
+
+def _modules_need_refresh(code_dir: Path, project_dir: Path) -> bool:
+    mcp_server = sys.modules.get("mcp_server")
+    if mcp_server is None:
+        return False
+
+    module_file = getattr(mcp_server, "__file__", None)
+    if module_file and not _path_is_within(Path(module_file), code_dir):
+        return True
+
+    expected_keys = str((project_dir / "all_keys.json").resolve())
+    expected_decrypted = str((project_dir / "decrypted").resolve())
+    loaded_keys = str(Path(getattr(mcp_server, "KEYS_FILE", "")).resolve())
+    loaded_decrypted = str(Path(getattr(mcp_server, "DECRYPTED_DIR", "")).resolve())
+    if loaded_keys != expected_keys or loaded_decrypted != expected_decrypted:
+        return True
+
+    keys_file = project_dir / "all_keys.json"
+    if keys_file.exists() and not getattr(mcp_server, "MSG_DB_KEYS", []):
+        return True
+
+    return False
 
 
 def _script_runner() -> list[str]:
@@ -100,6 +147,7 @@ def prepare_wechat_data(*, force: bool = False) -> dict[str, Any]:
     """Run the bundled decrypt flow so Cyber Judge can list local WeChat chats."""
     project_dir = _project_dir()
     code_dir = _code_dir()
+    _configure_wechat_project(project_dir)
     if not code_dir.exists():
         raise RuntimeError(f"未找到微信解密模块目录：{code_dir}")
     project_dir.mkdir(parents=True, exist_ok=True)
@@ -108,6 +156,7 @@ def prepare_wechat_data(*, force: bool = False) -> dict[str, Any]:
 
     before = get_wechat_prepare_status()
     if before["decrypted"] and not force:
+        _unload_wechat_decrypt_modules(code_dir)
         return {**before, "ran": False, "message": "微信数据库已准备好"}
 
     env = os.environ.copy()
@@ -140,12 +189,14 @@ def prepare_wechat_data(*, force: bool = False) -> dict[str, Any]:
             "解密命令已结束，但没有找到 decrypted/session/session.db。\n"
             + tail
         )
+    _unload_wechat_decrypt_modules(code_dir)
     return {**status, "ran": True, "message": "微信数据库已准备好", "output_tail": tail}
 
 
 def _load_modules() -> WechatModules:
     project_dir = _project_dir()
     code_dir = _code_dir()
+    _configure_wechat_project(project_dir)
     if not code_dir.exists():
         raise RuntimeError(f"未找到微信解密项目目录：{code_dir}。请设置 WECHAT_DECRYPT_CODE_DIR。")
     project_dir.mkdir(parents=True, exist_ok=True)
@@ -153,7 +204,9 @@ def _load_modules() -> WechatModules:
         raise RuntimeError(
             f"未找到微信解密项目目录：{project_dir}。请设置 WECHAT_DECRYPT_PROJECT_DIR。"
         )
-    os.environ.setdefault("WECHAT_DECRYPT_APP_DIR", str(project_dir))
+    if _modules_need_refresh(code_dir, project_dir):
+        _unload_wechat_decrypt_modules(code_dir)
+
     code_text = str(code_dir)
     if code_text not in sys.path:
         sys.path.insert(0, code_text)
@@ -214,6 +267,7 @@ def _session_db_path(modules: WechatModules) -> str:
 def list_wechat_chats(
     *,
     query: str = "",
+    kind: str = "all",
     limit: int = 50,
     start_time: str = "",
     end_time: str = "",
@@ -230,6 +284,10 @@ def list_wechat_chats(
     contact_full = mcp_server.get_contact_full()
     rows = export_all._build_chat_rows(sessions, names, contact_full)
 
+    allowed_kind = kind if kind in {"group", "single"} else "all"
+    if allowed_kind != "all":
+        rows = [row for row in rows if row.get("kind") == allowed_kind]
+
     needle = query.strip().lower()
     if needle:
         rows = [
@@ -240,20 +298,22 @@ def list_wechat_chats(
             or needle in str(row.get("nick_name", "")).lower()
         ]
 
-    limited = rows[: max(1, min(limit, 200))]
+    requested_limit = max(1, min(limit, 200))
+    stats_limit = max(requested_limit, int(os.environ.get("WECHAT_CHAT_STATS_LIMIT", "500")))
+    stats_rows = rows[: min(len(rows), stats_limit)]
     stats_by_username = {}
-    if limited:
+    if stats_rows:
         stats_by_username = export_all._collect_all_plan_stats(
-            limited,
+            stats_rows,
             start_ts=start_ts,
             end_ts=end_ts,
             size_mode="estimate",
         )
 
-    chats = []
-    for row in limited:
+    enriched_rows = []
+    for row in stats_rows:
         stats = stats_by_username.get(row["username"], {})
-        chats.append({
+        enriched_rows.append({
             "index": row["index"],
             "username": row["username"],
             "display_name": row["display_name"],
@@ -265,6 +325,16 @@ def list_wechat_chats(
             "last_time": stats.get("last_time", ""),
             "size_status": stats.get("size_status", ""),
         })
+
+    enriched_rows.sort(
+        key=lambda chat: (
+            int(chat["message_count"] or 0) > 0,
+            str(chat.get("last_time") or ""),
+            int(chat["message_count"] or 0),
+        ),
+        reverse=True,
+    )
+    chats = enriched_rows[:requested_limit]
 
     return {
         "project_dir": str(_project_dir()),
@@ -279,6 +349,7 @@ def export_wechat_chat(
     start_time: str = "",
     end_time: str = "",
     output_dir: str = "",
+    incremental: bool = False,
 ) -> dict[str, Any]:
     modules = _load_modules()
     export_all = modules.export_all_chats
@@ -288,7 +359,14 @@ def export_wechat_chat(
     if start_ts is not None and end_ts is not None and start_ts > end_ts:
         raise ValueError("开始时间不能晚于结束时间。")
 
-    target_dir = Path(output_dir or os.environ.get("WECHAT_IMPORT_OUTPUT_DIR", str(DEFAULT_IMPORT_DIR)))
+    configured_dir = output_dir.strip() or os.environ.get("WECHAT_IMPORT_OUTPUT_DIR", str(DEFAULT_IMPORT_DIR))
+    configured_dir = configured_dir.strip().strip('"').strip("'")
+    target_dir = Path(configured_dir).expanduser()
+    if not target_dir.is_absolute():
+        target_dir = BACKEND_DIR / target_dir
+    target_dir = target_dir.resolve()
+    if target_dir.exists() and not target_dir.is_dir():
+        raise ValueError(f"导出目录不能是文件：{target_dir}")
     target_dir.mkdir(parents=True, exist_ok=True)
 
     ok, total_count, new_count, error = export_all.export_one(
@@ -298,7 +376,7 @@ def export_wechat_chat(
         transcribe=False,
         start_ts=start_ts,
         end_ts=end_ts,
-        incremental=False,
+        incremental=incremental,
     )
     if not ok:
         raise RuntimeError(error or "微信聊天记录导出失败。")
@@ -322,99 +400,8 @@ def export_wechat_chat(
     return {
         "chat": display_name,
         "username": username,
+        "output_dir": str(target_dir),
         "export_path": export_path,
         "message_count": total_count,
         "new_count": new_count,
     }
-
-
-def _exported_chats_dir() -> Path:
-    return Path(os.environ.get("WECHAT_EXPORTED_CHATS_DIR", str(DEFAULT_EXPORTED_CHATS_DIR)))
-
-
-def _exported_file_meta(path: Path, *, read_messages: bool = False) -> dict[str, Any]:
-    stat = path.stat()
-    stem = path.stem
-    kind = "group" if path.name.startswith("group_") else "single"
-    display_name = stem.replace("group_", "", 1).replace("single_", "", 1)
-    meta: dict[str, Any] = {
-        "file_name": path.name,
-        "display_name": display_name,
-        "kind": kind,
-        "byte_size": stat.st_size,
-        "message_count": 0,
-        "date_first_msg": "",
-        "date_last_msg": "",
-        "updated_at": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
-    }
-    if not read_messages:
-        return meta
-
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        messages = data.get("messages", []) if isinstance(data, dict) else []
-        meta.update({
-            "display_name": str(data.get("chat") or display_name),
-            "message_count": len(messages) if isinstance(messages, list) else 0,
-            "date_first_msg": str(data.get("date_first_msg") or ""),
-            "date_last_msg": str(data.get("date_last_msg") or ""),
-        })
-    except (OSError, json.JSONDecodeError):
-        pass
-    return meta
-
-
-def list_exported_chat_samples(
-    *,
-    query: str = "",
-    kind: str = "all",
-    limit: int = 24,
-    min_size: int = 40 * 1024,
-    max_size: int = 180 * 1024,
-) -> dict[str, Any]:
-    """List medium-sized JSON exports for quick frontend demo selection."""
-    exported_dir = _exported_chats_dir()
-    if not exported_dir.exists():
-        return {
-            "directory": str(exported_dir),
-            "total": 0,
-            "chats": [],
-        }
-
-    needle = query.strip().lower()
-    allowed_kind = kind if kind in {"group", "single"} else "all"
-    rows: list[Path] = []
-    for path in exported_dir.glob("*.json"):
-        if path.name == "_export_index.json":
-            continue
-        size = path.stat().st_size
-        row_kind = "group" if path.name.startswith("group_") else "single"
-        if allowed_kind != "all" and row_kind != allowed_kind:
-            continue
-        if size < min_size or size > max_size:
-            continue
-        if needle and needle not in path.stem.lower():
-            continue
-        rows.append(path)
-
-    rows.sort(key=lambda item: (abs(item.stat().st_size - 80 * 1024), item.name))
-    capped = rows[: max(1, min(limit, 80))]
-    samples = [_exported_file_meta(path, read_messages=True) for path in capped]
-    return {
-        "directory": str(exported_dir),
-        "total": len(rows),
-        "chats": samples,
-    }
-
-
-def load_exported_chat_sample(file_name: str) -> dict[str, Any]:
-    exported_dir = _exported_chats_dir()
-    target = exported_dir / Path(file_name).name
-    if not target.exists() or target.name == "_export_index.json":
-        raise FileNotFoundError(f"未找到导出样例：{file_name}")
-    if target.suffix.lower() != ".json":
-        raise ValueError("仅支持 JSON 导出样例")
-    meta = _exported_file_meta(target, read_messages=True)
-    with target.open("r", encoding="utf-8") as f:
-        return {**meta, "text": f.read()}

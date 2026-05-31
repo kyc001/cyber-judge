@@ -57,27 +57,6 @@ export interface WechatChatsResponse {
   chats: WechatChatSummary[];
 }
 
-export interface ExportedChatSample {
-  file_name: string;
-  display_name: string;
-  kind: "single" | "group";
-  byte_size: number;
-  message_count: number;
-  date_first_msg: string;
-  date_last_msg: string;
-  updated_at: string;
-}
-
-export interface ExportedChatsResponse {
-  directory: string;
-  total: number;
-  chats: ExportedChatSample[];
-}
-
-export interface ExportedChatPayload extends ExportedChatSample {
-  text: string;
-}
-
 export interface WechatPrepareStatus {
   project_dir: string;
   config_exists: boolean;
@@ -92,9 +71,65 @@ export interface WechatPrepareStatus {
 export interface WechatExportResult {
   chat: string;
   username: string;
+  output_dir: string;
   export_path: string;
+  filename?: string;
+  json_text?: string;
   message_count: number;
   new_count: number;
+}
+
+export interface WechatImportStartResponse {
+  import_id: string;
+  status: "processing";
+  estimated_seconds: number;
+}
+
+export interface WechatImportProgressEvent {
+  type: "progress" | "done" | "error" | "heartbeat";
+  step?: string;
+  status?: string;
+  percent?: number;
+  message?: string;
+  error?: string;
+  report_id?: string;
+  export?: WechatExportResult;
+}
+
+export interface LlmProviderOption {
+  id: string;
+  label: string;
+  models: string[];
+  default_model: string;
+}
+
+export interface LlmProviderKeyState {
+  has_api_key: boolean;
+  api_key_tail: string;
+}
+
+export interface LlmConfig {
+  provider: string;
+  model: string;
+  has_api_key: boolean;
+  api_key_tail: string;
+  provider_keys: Record<string, LlmProviderKeyState>;
+  providers: LlmProviderOption[];
+  source: "local" | "environment" | "missing";
+}
+
+export interface LlmConfigUpdate {
+  provider: string;
+  model: string;
+  api_key?: string;
+  clear_api_key?: boolean;
+}
+
+export interface LlmTestResponse {
+  ok: boolean;
+  provider: string;
+  model: string;
+  message: string;
 }
 
 // ── Stats ──────────────────────────────────────────────────────
@@ -245,6 +280,7 @@ export interface ReportPayload {
   hero: { kicker: string; quote: string; visual: string };
   tags: string[]; sections: ReportSection[]; quotes: QuoteItem[];
   content_highlights?: ContentHighlight[];
+  insight_briefs?: Record<string, string>;
   stats: ReportStats;
   share: { slug?: string; hook: string; watermark: string };
 }

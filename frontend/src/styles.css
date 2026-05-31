@@ -835,6 +835,129 @@ input {
   flex: 0 0 auto;
 }
 
+.llm-settings-panel {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 18px;
+}
+
+.llm-settings-head {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.llm-settings-head h2 {
+  font-size: 1.15rem;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.llm-key-state {
+  background: #f6f8f4;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 0.74rem;
+  font-weight: 850;
+  padding: 6px 9px;
+}
+
+.llm-key-ready {
+  background: rgba(16, 163, 127, 0.1);
+  border-color: rgba(16, 163, 127, 0.28);
+  color: var(--green);
+}
+
+.llm-provider-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.llm-provider-option {
+  background: #f9f3e9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  min-height: 58px;
+  padding: 10px;
+  text-align: left;
+}
+
+.llm-provider-option span {
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.llm-provider-option small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.llm-provider-active {
+  background: #fff;
+  border-color: rgba(25, 132, 196, 0.65);
+  box-shadow: 0 8px 18px rgba(25, 132, 196, 0.1);
+}
+
+.llm-field {
+  display: grid;
+  gap: 7px;
+}
+
+.llm-field span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.llm-field input,
+.llm-field select {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font: inherit;
+  min-height: 42px;
+  outline: 0;
+  padding: 9px 10px;
+  width: 100%;
+}
+
+.llm-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.llm-actions .btn {
+  justify-content: center;
+  min-height: 40px;
+  width: 100%;
+}
+
+.llm-status {
+  background: #f6f8f4;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin: 0;
+  padding: 9px 10px;
+}
+
 .type-option svg {
   color: var(--blue);
 }
@@ -2122,3 +2245,38 @@ input {
   .edna-row { grid-template-columns: repeat(2, 1fr); }
   .fingerprint-grid { grid-template-columns: repeat(2, 1fr); }
   }
+
+/* Keep report page icons optically centered in the hero mark. */
+.report-hero .report-mark {
+  align-self: center;
+  display: grid;
+  line-height: 1;
+  margin-left: auto;
+  margin-right: auto;
+  place-items: center;
+}
+
+.report-hero .report-mark svg {
+  display: block;
+  margin: auto;
+}
+
+.report-section .section-copy {
+  margin-bottom: clamp(18px, 3vw, 28px);
+}
+
+.report-section .section-copy h2 {
+  line-height: 1.18;
+}
+
+.report-section .sentiment-gauge {
+  margin-inline: auto;
+  max-width: 360px;
+  width: min(100%, 360px);
+}
+
+.report-section .sentiment-trend {
+  margin-inline: auto;
+  max-width: 460px;
+  width: min(100%, 460px);
+}

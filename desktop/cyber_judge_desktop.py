@@ -139,23 +139,12 @@ def _configure_environment(host: str, port: int) -> None:
 
 
 def _load_env_files() -> None:
-    """Inject a user .env into os.environ before the backend imports settings.
+    """Keep packaged LLM credentials out of .env files.
 
-    The frozen backend lives in a temporary bundle dir with no .env, so the
-    packaged exe cannot read the developer's backend/.env and LLM_API_KEY ends
-    up empty (reports fall back to rule-based). Load a persistent user .env from
-    the app data dir (preferred) and one next to the exe so the bundled backend
-    inherits the key. Existing real env vars always win (override=False).
+    The desktop app reads provider/model/API key settings from the frontend and
+    stores them in the user's local app data directory instead.
     """
-    try:
-        from dotenv import load_dotenv
-    except Exception as exc:
-        _log(f"dotenv unavailable, skipping .env load: {exc}")
-        return
-    for env_path in (_app_data_dir() / ".env", _runtime_dir() / ".env"):
-        if env_path.is_file():
-            load_dotenv(env_path, override=False)
-            _log(f"loaded env file: {env_path}")
+    _log("skipping .env autoload; LLM settings are managed in the app UI")
 
 
 def _ensure_import_paths() -> None:
@@ -249,6 +238,27 @@ def _wait_until_ready(url: str, timeout_seconds: int = 45) -> None:
     raise RuntimeError(f"Cyber Judge backend did not become ready: {last_error}")
 
 
+class DesktopApi:
+    def choose_directory(self) -> str:
+        try:
+            import webview  # type: ignore
+
+            windows = getattr(webview, "windows", [])
+            if not windows:
+                return ""
+            selected = windows[0].create_file_dialog(
+                webview.FOLDER_DIALOG,
+                allow_multiple=False,
+            )
+            if not selected:
+                return ""
+            first = selected[0] if isinstance(selected, (list, tuple)) else selected
+            return str(first or "")
+        except Exception as exc:
+            _log(f"Directory picker failed: {exc}")
+            return ""
+
+
 def _open_webview(url: str) -> bool:
     try:
         import webview  # type: ignore
@@ -256,7 +266,7 @@ def _open_webview(url: str) -> bool:
         return False
 
     try:
-        webview.create_window(APP_NAME, url, width=1240, height=860, min_size=(960, 640))
+        webview.create_window(APP_NAME, url, width=1240, height=860, min_size=(960, 640), js_api=DesktopApi())
         webview.start()
         return True
     except Exception as exc:

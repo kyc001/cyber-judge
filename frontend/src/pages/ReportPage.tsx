@@ -134,7 +134,7 @@ export function ReportPage() {
           <Link className="icon-link" to="/upload" title="上传新文件">
             <Upload size={18} />
           </Link>
-          <Link className="icon-link" to={`/insights/${reportId}/summary`} title="聊天分镜">
+          <Link className="icon-link" to={`/insights/${reportId}/summary`} title="中间分析页">
             <BarChart3 size={18} />
           </Link>
           <ThemeToggle />

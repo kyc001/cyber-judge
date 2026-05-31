@@ -10,6 +10,7 @@ import html
 import json
 import re
 from datetime import datetime
+from pathlib import Path
 
 from models import ChatMessage
 
@@ -51,9 +52,8 @@ def _detect_weflow_message_type(local_type: int) -> str:
     return type_map.get(local_type, "text")
 
 
-def parse_weflow_json(text: str) -> list[ChatMessage]:
-    """Parse WeFlow JSON export into structured ChatMessage list."""
-    data = json.loads(text)
+def parse_weflow_data(data: dict) -> list[ChatMessage]:
+    """Parse WeFlow JSON data into structured ChatMessage list."""
     raw_msgs = data.get("messages", []) if isinstance(data, dict) else []
 
     messages: list[ChatMessage] = []
@@ -88,6 +88,11 @@ def parse_weflow_json(text: str) -> list[ChatMessage]:
     return messages
 
 
+def parse_weflow_json(text: str) -> list[ChatMessage]:
+    """Parse WeFlow JSON export into structured ChatMessage list."""
+    return parse_weflow_data(json.loads(text))
+
+
 def _wechat_type(raw_type: object, content: str) -> str:
     kind = str(raw_type or "text").strip().lower()
     if kind in ("text", ""):
@@ -118,9 +123,8 @@ def _timestamp_to_iso(value: object) -> str:
         return ""
 
 
-def parse_wechat_decrypt_json(text: str) -> list[ChatMessage]:
-    """Parse JSON exported by the wechat-decrypt reference project."""
-    data = json.loads(text)
+def parse_wechat_decrypt_data(data: dict) -> list[ChatMessage]:
+    """Parse data exported by the wechat-decrypt reference project."""
     raw_msgs = data.get("messages", []) if isinstance(data, dict) else []
 
     messages: list[ChatMessage] = []
@@ -157,6 +161,24 @@ def parse_wechat_decrypt_json(text: str) -> list[ChatMessage]:
     return messages
 
 
+def parse_wechat_decrypt_json(text: str) -> list[ChatMessage]:
+    """Parse JSON exported by the wechat-decrypt reference project."""
+    return parse_wechat_decrypt_data(json.loads(text))
+
+
+def parse_loaded_data(data: object) -> list[ChatMessage]:
+    """Validate and parse already loaded supported chat JSON data."""
+    raw_msgs = data.get("messages", []) if isinstance(data, dict) else []
+    if raw_msgs and isinstance(raw_msgs[0], dict) and "timestamp" in raw_msgs[0]:
+        messages = parse_wechat_decrypt_data(data)
+    else:
+        messages = parse_weflow_data(data)
+
+    if not messages:
+        raise ValueError("未能解析出消息，请检查 JSON 格式是否为 WeFlow 或微信解密导出。")
+    return messages
+
+
 def parse_and_validate(text: str) -> list[ChatMessage]:
     """Validate and parse supported chat JSON text."""
     try:
@@ -164,12 +186,15 @@ def parse_and_validate(text: str) -> list[ChatMessage]:
     except json.JSONDecodeError as exc:
         raise ValueError("JSON 格式解析失败，请上传 WeFlow 或微信解密导出的 JSON 文件。") from exc
 
-    raw_msgs = data.get("messages", []) if isinstance(data, dict) else []
-    if raw_msgs and isinstance(raw_msgs[0], dict) and "timestamp" in raw_msgs[0]:
-        messages = parse_wechat_decrypt_json(text)
-    else:
-        messages = parse_weflow_json(text)
+    return parse_loaded_data(data)
 
-    if not messages:
-        raise ValueError("未能解析出消息，请检查 JSON 格式是否为 WeFlow 或微信解密导出。")
-    return messages
+
+def parse_json_file(path: str | Path) -> list[ChatMessage]:
+    """Validate and parse supported chat JSON directly from disk."""
+    try:
+        with Path(path).open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise ValueError("JSON 格式解析失败，请上传 WeFlow 或微信解密导出的 JSON 文件。") from exc
+
+    return parse_loaded_data(data)

@@ -170,7 +170,7 @@ function formatCompactNumber(value: number | undefined) {
 }
 
 function getReportModeLabel(report: ReportPayload) {
-  return report.report_type === "relationship" ? "好友关系锐评" : "群聊锐评";
+  return report.report_type === "relationship" ? "双人报告" : "群聊报告";
 }
 
 export function ReportRenderer({ report, shareUrl }: ReportRendererProps) {
@@ -182,19 +182,19 @@ export function ReportRenderer({ report, shareUrl }: ReportRendererProps) {
   const insightCards = [
     {
       icon: Brain,
-      title: "AI 先讲重点",
+      title: "报告摘要",
       body: report.sections[0]?.body || report.tagline,
       to: `/insights/${report.report_id}/summary`,
     },
     {
       icon: Clock3,
       title: "作息与节奏",
-      body: `高峰时段 ${peakHour}，适合先看谁在什么时候把聊天盘活。`,
+      body: `高峰时段 ${peakHour}，展示聊天更活跃的时间。`,
       to: `/insights/${report.report_id}/time`,
     },
     {
       icon: report.report_type === "relationship" ? HeartHandshake : UsersRound,
-      title: report.report_type === "relationship" ? "好友关系" : "群聊结构",
+      title: report.report_type === "relationship" ? "双人关系" : "群聊结构",
       body: report.report_type === "relationship"
         ? "主动程度、回复节奏、共同语言和关系里程碑放在一屏看。"
         : `先看 ${topSender} 和其他成员之间的互动强弱。`,
@@ -202,13 +202,13 @@ export function ReportRenderer({ report, shareUrl }: ReportRendererProps) {
     },
     {
       icon: MessageSquareQuote,
-      title: "名场面回放",
-      body: `${report.quotes.length || stats.famous_quotes.length} 条真实聊天片段会被优先拿出来点评。`,
+      title: "代表片段",
+      body: `${report.quotes.length || stats.famous_quotes.length} 条真实聊天片段会被优先展示。`,
       to: `/insights/${report.report_id}/quotes`,
     },
     {
       icon: Sparkles,
-      title: "赛博占卜",
+      title: "趋势预测",
       body: "基于活跃趋势、共同语言和情绪底色给下一阶段预测。",
       to: `/insights/${report.report_id}/predictions`,
     },
@@ -229,11 +229,11 @@ export function ReportRenderer({ report, shareUrl }: ReportRendererProps) {
 
       <section className="report-section ai-summary-section">
         <div className="section-copy">
-          <p className="eyebrow">AI Overview</p>
-          <h2>先看这份报告最值得挖的地方</h2>
+          <p className="eyebrow">报告概览</p>
+          <h2>先看报告摘要</h2>
           <p>
             {getReportModeLabel(report)}已经生成。你可以按完整报告往下读，也可以直接跳到
-            时间、关系、名场面和预测分镜里看 AI 的判断依据。
+            时间、关系、代表片段和趋势预测页查看判断依据。
           </p>
         </div>
         <div className="ai-metric-strip" aria-label="报告关键数据">
@@ -268,7 +268,7 @@ export function ReportRenderer({ report, shareUrl }: ReportRendererProps) {
         </div>
         <Link className="btn btn-primary ai-summary-cta" to={`/insights/${report.report_id}/summary`}>
           <BarChart3 size={18} />
-          <span>进入 AI 聊天分镜</span>
+          <span>进入中间分析页</span>
         </Link>
       </section>
 
@@ -287,11 +287,11 @@ export function ReportRenderer({ report, shareUrl }: ReportRendererProps) {
 
       <section className="quote-gallery">
         <div className="section-copy">
-          <p className="eyebrow">名场面</p>
-          <h2>{report.report_type === "relationship" ? "关系金句" : "聊天金句"}</h2>
+          <p className="eyebrow">代表片段</p>
+          <h2>{report.report_type === "relationship" ? "双人片段" : "聊天片段"}</h2>
           <p>{report.report_type === "relationship"
-            ? "这组卡片更偏向两个人之间那些说不清但截图后很上头的句子。"
-            : "AI 从聊天记录中挖掘的金句，每一句都有故事。"}</p>
+            ? "这组卡片展示两个人对话中更有代表性的句子。"
+            : "这些片段来自原始聊天记录，用于辅助理解报告结论。"}</p>
         </div>
         <div className="quote-grid">
           {report.quotes.map((quote) => (
