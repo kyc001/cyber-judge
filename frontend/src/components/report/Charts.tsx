@@ -21,8 +21,8 @@ const panelGridStyle: CSSProperties = {
 };
 
 const panelCardStyle: CSSProperties = {
-  background: "var(--bg-secondary)",
-  border: "1px solid var(--border-default)",
+  background: "var(--report-panel, var(--bg-secondary))",
+  border: "1px solid var(--report-line, var(--border-default))",
   borderRadius: "var(--radius-sm)",
   padding: "0.95rem",
 };
@@ -35,7 +35,7 @@ const compactRowStyle: CSSProperties = {
 };
 
 const miniBarTrackStyle: CSSProperties = {
-  background: "var(--bg-tertiary)",
+  background: "var(--report-soft, var(--bg-tertiary))",
   borderRadius: 999,
   height: 8,
   overflow: "hidden",

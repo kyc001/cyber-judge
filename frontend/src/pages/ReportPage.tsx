@@ -106,7 +106,7 @@ export function ReportPage() {
       <main className="page report-page">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", flexDirection: "column", gap: "1rem" }}>
           <Loader2 className="spin" size={48} />
-          <p style={{ color: "var(--text-secondary)" }}>加载报告中...</p>
+          <p style={{ color: "var(--report-muted, var(--text-secondary))" }}>加载报告中...</p>
         </div>
       </main>
     );
@@ -127,16 +127,18 @@ export function ReportPage() {
     <main className="page report-page">
       <div className="scroll-progress" style={{ width: `${scrollPercent}%` }} />
       <nav className="report-toolbar">
-        <Link className="icon-link" to="/" title="首页">
-          <Home size={18} />
-        </Link>
-        <Link className="icon-link" to="/upload" title="上传新文件" style={{ marginLeft: 8 }}>
-          <Upload size={18} />
-        </Link>
-        <Link className="icon-link" to={`/insights/${reportId}/summary`} title="聊天分镜" style={{ marginLeft: 8 }}>
-          <BarChart3 size={18} />
-        </Link>
-        <ThemeToggle />
+        <div className="toolbar-navigation">
+          <Link className="icon-link" to="/" title="首页">
+            <Home size={18} />
+          </Link>
+          <Link className="icon-link" to="/upload" title="上传新文件">
+            <Upload size={18} />
+          </Link>
+          <Link className="icon-link" to={`/insights/${reportId}/summary`} title="中间分析页">
+            <BarChart3 size={18} />
+          </Link>
+          <ThemeToggle />
+        </div>
         <div className="toolbar-actions">
           <Button icon={<Copy size={18} />} onClick={copyLink} variant="secondary">
             复制链接

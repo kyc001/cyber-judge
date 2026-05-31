@@ -25,7 +25,7 @@ export interface ChatMessage {
 
 export interface AnalyzeRequest {
   report_type: ReportType;
-  source: "wechat_txt" | "weflow_json" | "paste" | "mock";
+  source: "wechat_txt" | "weflow_json" | "wechat_decrypt_json" | "paste" | "mock";
   messages: ChatMessage[];
   privacy: { anonymized: boolean; alias_map?: Record<string, string> };
   client_meta: { schema_version: "2026-05-24"; locale: "zh-CN" };
@@ -35,6 +35,101 @@ export interface AnalyzeResponse {
   report_id: string;
   status: "queued" | "processing" | "done";
   estimated_seconds: number;
+  export?: WechatExportResult;
+}
+
+export interface WechatChatSummary {
+  index: number;
+  username: string;
+  display_name: string;
+  kind: "single" | "group";
+  remark?: string;
+  nick_name?: string;
+  message_count: number;
+  first_time: string;
+  last_time: string;
+  size_status?: string;
+}
+
+export interface WechatChatsResponse {
+  project_dir: string;
+  total: number;
+  chats: WechatChatSummary[];
+}
+
+export interface WechatPrepareStatus {
+  project_dir: string;
+  config_exists: boolean;
+  keys_exists: boolean;
+  decrypted: boolean;
+  session_db: string;
+  ran?: boolean;
+  message?: string;
+  output_tail?: string;
+}
+
+export interface WechatExportResult {
+  chat: string;
+  username: string;
+  output_dir: string;
+  export_path: string;
+  filename?: string;
+  json_text?: string;
+  message_count: number;
+  new_count: number;
+}
+
+export interface WechatImportStartResponse {
+  import_id: string;
+  status: "processing";
+  estimated_seconds: number;
+}
+
+export interface WechatImportProgressEvent {
+  type: "progress" | "done" | "error" | "heartbeat";
+  step?: string;
+  status?: string;
+  percent?: number;
+  message?: string;
+  error?: string;
+  report_id?: string;
+  export?: WechatExportResult;
+}
+
+export interface LlmProviderOption {
+  id: string;
+  label: string;
+  models: string[];
+  default_model: string;
+}
+
+export interface LlmProviderKeyState {
+  has_api_key: boolean;
+  api_key_tail: string;
+}
+
+export interface LlmConfig {
+  provider: string;
+  model: string;
+  has_api_key: boolean;
+  api_key_tail: string;
+  provider_keys: Record<string, LlmProviderKeyState>;
+  providers: LlmProviderOption[];
+  source: "local" | "environment" | "missing";
+}
+
+export interface LlmConfigUpdate {
+  provider: string;
+  model: string;
+  api_key?: string;
+  clear_api_key?: boolean;
+}
+
+export interface LlmTestResponse {
+  ok: boolean;
+  provider: string;
+  model: string;
+  message: string;
 }
 
 // ── Stats ──────────────────────────────────────────────────────
@@ -170,12 +265,22 @@ export interface ReportSection {
   chart_ref?: keyof ReportStats;
 }
 export interface QuoteItem { id: string; speaker: string; text: string; comment: string; icon: string; }
+export interface DialogueLine { sender: string; text: string; ts?: string; }
+export interface ContentHighlight {
+  id: string;
+  title: string;
+  insight: string;
+  evidence: DialogueLine[];
+  tag: string;
+}
 
 export interface ReportPayload {
   report_id: string; report_type: ReportType; created_at: string;
   title: string; tagline: string;
   hero: { kicker: string; quote: string; visual: string };
   tags: string[]; sections: ReportSection[]; quotes: QuoteItem[];
+  content_highlights?: ContentHighlight[];
+  insight_briefs?: Record<string, string>;
   stats: ReportStats;
   share: { slug?: string; hook: string; watermark: string };
 }

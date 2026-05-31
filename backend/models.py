@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 ReportType = Literal["group_roast", "relationship"]
 MessageType = Literal["text", "image", "emoji", "file", "link", "system", "red_packet", "transfer", "unknown"]
-SourceType = Literal["wechat_txt", "weflow_json", "paste", "mock"]
+SourceType = Literal["wechat_txt", "weflow_json", "wechat_decrypt_json", "paste", "mock"]
 ToneType = Literal["hot", "soft", "sharp", "calm"]
 SectionType = Literal[
     "summary", "dragon_rank", "heatmap", "keywords", "radar", "emoji", "timeline",
@@ -306,6 +306,20 @@ class QuoteItem(BaseModel):
     icon: str = "sparkles"
 
 
+class DialogueLine(BaseModel):
+    sender: str
+    text: str
+    ts: Optional[str] = None
+
+
+class ContentHighlight(BaseModel):
+    id: str
+    title: str
+    insight: str
+    evidence: list[DialogueLine] = Field(default_factory=list)
+    tag: str = "content"
+
+
 class HeroBlock(BaseModel):
     kicker: str
     quote: str
@@ -330,6 +344,8 @@ class ReportPayload(BaseModel):
     tags: list[str]
     sections: list[ReportSection]
     quotes: list[QuoteItem]
+    content_highlights: list[ContentHighlight] = Field(default_factory=list)
+    insight_briefs: dict[str, str] = Field(default_factory=dict)
     stats: ReportStats
     share: ShareBlock
 

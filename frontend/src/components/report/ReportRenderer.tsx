@@ -1,3 +1,5 @@
+import { BarChart3, Brain, Clock3, HeartHandshake, MessageSquareQuote, Sparkles, UsersRound } from "lucide-react";
+import { Link } from "react-router-dom";
 import type { ReportPayload, ReportSection } from "../../contracts/report";
 import {
   AnnualSummaryCard,
@@ -11,6 +13,7 @@ import {
   RelationshipScoreboard, SentimentGauge, StreakCard,
   TimeProfilePanel, Timeline, WordCommonalityChart, WordSpecificityChart,
 } from "./Charts";
+import { ContentHighlightsPanel } from "./ContentHighlights";
 import { ShareCard } from "./ShareCard";
 
 interface ReportRendererProps { report: ReportPayload; shareUrl: string; }
@@ -160,7 +163,57 @@ function quoteIcon(icon: string) {
   return icons[icon] ?? icon;
 }
 
+function formatCompactNumber(value: number | undefined) {
+  if (!Number.isFinite(value)) return "待分析";
+  if ((value ?? 0) >= 10000) return `${((value ?? 0) / 10000).toFixed(1)} 万`;
+  return `${value}`;
+}
+
+function getReportModeLabel(report: ReportPayload) {
+  return report.report_type === "relationship" ? "双人报告" : "群聊报告";
+}
+
 export function ReportRenderer({ report, shareUrl }: ReportRendererProps) {
+  const stats = report.stats;
+  const totalMessages = stats.chat_dna?.total_messages;
+  const activeDays = stats.chat_dna?.active_days;
+  const topSender = stats.chat_dna?.top_sender_name || stats.participants[0]?.name || "待分析";
+  const peakHour = Number.isFinite(stats.chat_dna?.top_hour) ? `${stats.chat_dna?.top_hour}:00` : "待分析";
+  const insightCards = [
+    {
+      icon: Brain,
+      title: "报告摘要",
+      body: report.sections[0]?.body || report.tagline,
+      to: `/insights/${report.report_id}/summary`,
+    },
+    {
+      icon: Clock3,
+      title: "作息与节奏",
+      body: `高峰时段 ${peakHour}，展示聊天更活跃的时间。`,
+      to: `/insights/${report.report_id}/time`,
+    },
+    {
+      icon: report.report_type === "relationship" ? HeartHandshake : UsersRound,
+      title: report.report_type === "relationship" ? "双人关系" : "群聊结构",
+      body: report.report_type === "relationship"
+        ? "主动程度、回复节奏、共同语言和关系里程碑放在一屏看。"
+        : `先看 ${topSender} 和其他成员之间的互动强弱。`,
+      to: `/insights/${report.report_id}/relationship`,
+    },
+    {
+      icon: MessageSquareQuote,
+      title: "代表片段",
+      body: `${report.quotes.length || stats.famous_quotes.length} 条真实聊天片段会被优先展示。`,
+      to: `/insights/${report.report_id}/quotes`,
+    },
+    {
+      icon: Sparkles,
+      title: "趋势预测",
+      body: "基于活跃趋势、共同语言和情绪底色给下一阶段预测。",
+      to: `/insights/${report.report_id}/predictions`,
+    },
+  ];
+
   return (
     <article className="report-renderer">
       <section className="report-hero">
@@ -173,6 +226,53 @@ export function ReportRenderer({ report, shareUrl }: ReportRendererProps) {
           {report.tags.map((tag) => <span key={tag}>{tag}</span>)}
         </div>
       </section>
+
+      <section className="report-section ai-summary-section">
+        <div className="section-copy">
+          <p className="eyebrow">报告概览</p>
+          <h2>先看报告摘要</h2>
+          <p>
+            {getReportModeLabel(report)}已经生成。你可以按完整报告往下读，也可以直接跳到
+            时间、关系、代表片段和趋势预测页查看判断依据。
+          </p>
+        </div>
+        <div className="ai-metric-strip" aria-label="报告关键数据">
+          <div>
+            <span>消息量</span>
+            <strong>{formatCompactNumber(totalMessages)}</strong>
+          </div>
+          <div>
+            <span>{report.report_type === "relationship" ? "双方" : "成员"}</span>
+            <strong>{stats.participants.length}</strong>
+          </div>
+          <div>
+            <span>活跃天数</span>
+            <strong>{formatCompactNumber(activeDays)}</strong>
+          </div>
+          <div>
+            <span>高峰时段</span>
+            <strong>{peakHour}</strong>
+          </div>
+        </div>
+        <div className="ai-route-grid">
+          {insightCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <Link className="ai-route-card" key={card.title} to={card.to}>
+                <span><Icon size={18} /></span>
+                <strong>{card.title}</strong>
+                <em>{card.body}</em>
+              </Link>
+            );
+          })}
+        </div>
+        <Link className="btn btn-primary ai-summary-cta" to={`/insights/${report.report_id}/summary`}>
+          <BarChart3 size={18} />
+          <span>进入中间分析页</span>
+        </Link>
+      </section>
+
+      <ContentHighlightsPanel highlights={report.content_highlights} />
 
       {report.sections.map((section) => (
         <section className={`report-section report-section-${section.type}`} id={`section-${section.id}`} key={section.id}>
@@ -187,11 +287,11 @@ export function ReportRenderer({ report, shareUrl }: ReportRendererProps) {
 
       <section className="quote-gallery">
         <div className="section-copy">
-          <p className="eyebrow">名场面</p>
-          <h2>{report.report_type === "relationship" ? "关系金句" : "聊天金句"}</h2>
+          <p className="eyebrow">代表片段</p>
+          <h2>{report.report_type === "relationship" ? "双人片段" : "聊天片段"}</h2>
           <p>{report.report_type === "relationship"
-            ? "这组卡片更偏向两个人之间那些说不清但截图后很上头的句子。"
-            : "AI 从聊天记录中挖掘的金句，每一句都有故事。"}</p>
+            ? "这组卡片展示两个人对话中更有代表性的句子。"
+            : "这些片段来自原始聊天记录，用于辅助理解报告结论。"}</p>
         </div>
         <div className="quote-grid">
           {report.quotes.map((quote) => (

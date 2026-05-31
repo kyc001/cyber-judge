@@ -2,16 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import { Brain, ChartNoAxesColumnIncreasing, MessageCircleMore } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
-const copy = ["正在统计哈哈哈数量", "正在挖名场面", "正在让 AI 想锐评", "正在生成聊天分镜"];
+const copy = ["正在解析聊天记录", "正在计算统计特征", "正在整理代表片段", "正在生成报告"];
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 const stepLabels: Record<string, string> = {
   stats: "统计特征提取",
   hero: "标题与封面",
-  participants: "成员人设锐评",
-  quotes: "真实金句挖掘",
+  participants: "成员摘要",
+  quotes: "代表片段",
   sections: "报告正文撰写",
-  predictions: "赛博占卜",
-  chat_dna: "聊天基因总结",
+  predictions: "趋势预测",
+  insight_briefs: "中间页锐评",
+  chat_dna: "聊天摘要",
   llm_single: "LLM 综合生成",
 };
 
@@ -21,6 +22,7 @@ export function AnalyzingPage() {
   const reportId = searchParams.get("reportId") || "";
   const [progress, setProgress] = useState(8);
   const [steps, setSteps] = useState<{ step: string; status: string; error?: string }[]>([]);
+  const [error, setError] = useState("");
   const phrase = useMemo(
     () => copy[Math.min(copy.length - 1, Math.floor(progress / 28))],
     [progress],
@@ -45,6 +47,9 @@ export function AnalyzingPage() {
           setProgress(100);
           window.setTimeout(() => navigate(`/insights/${reportId}/summary`), 420);
         }
+        if (data.type === "error") {
+          setError(data.error || "报告生成失败");
+        }
       } catch {
         // Ignore malformed progress events and continue polling.
       }
@@ -58,7 +63,7 @@ export function AnalyzingPage() {
   useEffect(() => {
     let cancelled = false;
     async function poll() {
-      for (let i = 0; i < 30; i++) {
+      while (!cancelled) {
         if (cancelled) return;
         try {
           const res = await fetch(`${API_BASE}/api/report/${reportId}`);
@@ -68,27 +73,20 @@ export function AnalyzingPage() {
             return;
           }
           if (res.status === 202) setProgress((prev) => Math.min(95, prev + 5));
+          if (res.status >= 400 && res.status !== 202) {
+            const body = await res.text();
+            setError(body || `报告生成失败 (${res.status})`);
+            return;
+          }
         } catch {
           // retry
         }
         await new Promise((r) => setTimeout(r, 2000));
       }
-      if (!cancelled) {
-        setProgress(100);
-        setTimeout(() => navigate(`/insights/${reportId}/summary`), 420);
-      }
     }
     poll();
     return () => { cancelled = true; };
   }, [navigate, reportId]);
-
-  useEffect(() => {
-    if (progress >= 100) {
-      const timeout = window.setTimeout(() => navigate(`/insights/${reportId}/summary`), 420);
-      return () => window.clearTimeout(timeout);
-    }
-    return undefined;
-  }, [navigate, progress, reportId]);
 
   return (
     <main className="page analyzing-page">
@@ -98,9 +96,10 @@ export function AnalyzingPage() {
           <ChartNoAxesColumnIncreasing />
           <Brain />
         </div>
-        <p className="eyebrow">Analyzing</p>
+        <p className="eyebrow">分析中</p>
         <h1>{phrase}...</h1>
-        <p>AI 正在分析你的聊天记录，请稍候...</p>
+        <p>正在分析聊天记录，请稍候。</p>
+        {error ? <p className="muted">{error}</p> : null}
         <div className="progress-shell">
           <div className="progress-bar" style={{ width: `${progress}%` }} />
         </div>

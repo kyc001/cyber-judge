@@ -37,6 +37,7 @@ import {
   WordCommonalityChart,
   WordSpecificityChart,
 } from "../components/report/Charts";
+import { ContentHighlightsPanel } from "../components/report/ContentHighlights";
 import type { ReportPayload } from "../contracts/report";
 
 type InsightView =
@@ -53,12 +54,12 @@ const VIEW_META: { id: InsightView; title: string; body: string }[] = [
   { id: "media", title: "消息结构", body: "聚合文本、图片、表情、文件、链接、撤回、红包和类型演变。" },
   { id: "relationship", title: "关系走势", body: "用月度互动量、双方发言差异、里程碑和最初对话展示关系变化。" },
   { id: "quotes", title: "名场面回放", body: "把真实聊天里的高分句子、代表语录和最初对话做成回放页。" },
-  { id: "predictions", title: "赛博占卜", body: "AI 基于趋势给出未来预测、人格勋章和下一阶段看点。" },
+  { id: "predictions", title: "赛博占卜", body: "基于趋势给出未来预测、人格勋章和下一阶段看点。" },
 ];
 
 const cardStyle = {
-  background: "var(--bg-secondary)",
-  border: "1px solid var(--border-default)",
+  background: "var(--report-panel, var(--bg-secondary))",
+  border: "1px solid var(--report-line, var(--border-default))",
   borderRadius: "var(--radius-sm)",
   padding: "1rem",
 } as const;
@@ -97,11 +98,10 @@ function MetricGrid({ items }: { items: [string, ReactNode, string?][] }) {
   );
 }
 
-function SectionBlock({ children, kicker, title }: { children: ReactNode; kicker: string; title: string }) {
+function SectionBlock({ children, title }: { children: ReactNode; title: string }) {
   return (
     <section className="report-section">
       <div className="section-copy">
-        <p className="eyebrow">{kicker}</p>
         <h2>{title}</h2>
       </div>
       {children}
@@ -114,28 +114,30 @@ function sectionBody(report: ReportPayload, ids: string[]) {
 }
 
 function getAiBrief(report: ReportPayload, view: InsightView) {
-  const stats = report.stats;
+  const llmBrief = report.insight_briefs?.[view]?.trim();
+  if (llmBrief) return llmBrief;
+
   const briefs: Record<InsightView, string> = {
     summary: sectionBody(report, ["chat-dna", "summary"]) ||
-      `AI 先看总账：${stats.chat_dna?.total_messages ?? 0} 条消息、${stats.chat_dna?.active_days ?? 0} 个活跃日，最值得关注的是聊天节奏和高频成员。`,
+      "本页锐评暂未生成。重新生成报告可以补齐这段内容。",
     time: sectionBody(report, ["heatmap", "chronotype", "monthly"]) ||
-      `AI 判断黄金时段在 ${stats.chat_dna?.top_hour ?? "未知"} 点，作息页会重点看谁在深夜撑起聊天量。`,
+      "本页锐评暂未生成。重新生成报告可以补齐这段内容。",
     language: sectionBody(report, ["keywords", "specificity", "commonality"]) ||
-      "AI 会把高频词、个人口头禅和共同词汇放在一起看，判断这个聊天关系里真正反复出现的暗号。",
+      "本页锐评暂未生成。重新生成报告可以补齐这段内容。",
     emoji: sectionBody(report, ["emoji"]) ||
-      "AI 会把中英文微信表情名先合并，再看谁的表情最有个人识别度，避免 Facepalm 和捂脸被拆成两个表情。",
+      "本页锐评暂未生成。重新生成报告可以补齐这段内容。",
     interaction: sectionBody(report, ["initiative", "relationship-map", "links"]) ||
-      "AI 不只看谁发得多，也看谁接话、谁打破冷场、谁在对话网络里承担连接作用。",
+      "本页锐评暂未生成。重新生成报告可以补齐这段内容。",
     emotion: sectionBody(report, ["sentiment"]) ||
-      `AI 给出的情绪底色是：${stats.sentiment_overview?.label || "数据不足，待观察"}。`,
+      "本页锐评暂未生成。重新生成报告可以补齐这段内容。",
     media: sectionBody(report, ["msg-types", "links"]) ||
-      "AI 会根据文字、图片、表情、链接、红包、撤回等结构判断聊天的表达方式，而不是只看消息数量。",
+      "本页锐评暂未生成。重新生成报告可以补齐这段内容。",
     relationship: sectionBody(report, ["relationship-summary", "relationship-radar", "relationship-timeline"]) ||
-      "AI 会把关系走势当作时间序列看：互动总量、双方发言差异、里程碑和断联重连共同决定观察重点。",
+      "本页锐评暂未生成。重新生成报告可以补齐这段内容。",
     quotes: report.quotes[0]?.comment ||
-      "AI 会优先挑真实出现过、有记忆点、能代表聊天氛围的原话，而不是重新编造金句。",
+      "本页锐评暂未生成。重新生成报告可以补齐这段内容。",
     predictions: sectionBody(report, ["predictions"]) ||
-      "AI 的预测会基于活跃趋势、作息、互动网络和共同语言，只做娱乐化判断，不替用户定义现实关系。",
+      "本页锐评暂未生成。重新生成报告可以补齐这段内容。",
   };
   return briefs[view];
 }
@@ -174,11 +176,10 @@ function PageShell({
       <article className="report-renderer">
         <section className="report-hero" style={{ minHeight: "34vh" }}>
           <div className="report-mark"><ViewIcon id={meta.id} /></div>
-          <p className="eyebrow">主题分镜</p>
           <h1>{meta.title}</h1>
           <p className="report-tagline">{meta.body}</p>
         </section>
-        <SectionBlock kicker="AI" title="AI 先判一句">
+        <SectionBlock title="本页锐评">
           <p style={{ fontSize: "1.05rem", lineHeight: 1.8, margin: 0 }}>{getAiBrief(report, meta.id)}</p>
         </SectionBlock>
         {children}
@@ -202,7 +203,7 @@ function PageShell({
             </div>
             <div style={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "space-between" }}>
               <p className="muted" style={{ margin: 0 }}>
-                {next ? `下一页：${next.title}` : "主题分镜已完成，进入最终报告。"}
+                {next ? `下一页：${next.title}` : "中间分析页已完成，进入最终报告。"}
               </p>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                 {previous ? (
@@ -228,10 +229,16 @@ function SummaryView({ report }: { report: ReportPayload }) {
   const stats = report.stats;
   return (
     <>
-      <SectionBlock kicker="总览" title="聊天总账">
+      <ContentHighlightsPanel
+        compact
+        highlights={report.content_highlights}
+        title="这份聊天最有内容的几处"
+        intro="优先读这些真实对话片段，再结合统计结果判断群聊氛围、关系模式和名场面。"
+      />
+      <SectionBlock title="聊天总账">
         <AnnualSummaryCard annual={stats.annual_summary} />
       </SectionBlock>
-      <SectionBlock kicker="基因" title="聊天基因">
+      <SectionBlock title="聊天基因">
         <div className="v2-stack">
           {stats.chat_dna ? <ChatDNACard dna={stats.chat_dna} /> : <p className="muted">暂无聊天 DNA。</p>}
           {stats.enhanced_chat_dna ? <EnhancedDNACard dna={stats.enhanced_chat_dna} /> : null}
@@ -246,10 +253,10 @@ function TimeView({ report }: { report: ReportPayload }) {
   const stats = report.stats;
   return (
     <>
-      <SectionBlock kicker="时间" title="时间分布">
+      <SectionBlock title="时间分布">
         <TimeProfilePanel hourly={stats.hourly_distribution} peakDay={stats.peak_day} weekday={stats.weekday_distribution} yearly={stats.yearly_monthly} />
       </SectionBlock>
-      <SectionBlock kicker="作息" title="作息指纹">
+      <SectionBlock title="作息指纹">
         <div className="v2-stack">
           <ChronotypeList chronotypes={stats.chronotypes} />
           <ClockFingerprintGrid fingerprints={stats.clock_fingerprints} />
@@ -263,14 +270,14 @@ function LanguageView({ report }: { report: ReportPayload }) {
   const stats = report.stats;
   return (
     <>
-      <SectionBlock kicker="语言" title="词云与口头禅">
+      <SectionBlock title="词云与口头禅">
         <div className="v2-stack">
           <KeywordCloud keywords={stats.keywords} />
           <WordSpecificityChart items={stats.word_specificity} />
           <WordCommonalityChart items={stats.word_commonality} />
         </div>
       </SectionBlock>
-      <SectionBlock kicker="短语" title="高频短语">
+      <SectionBlock title="高频短语">
         <div style={gridStyle}>
           {stats.ngrams.slice(0, 12).map((item) => (
             <div key={item.phrase} style={cardStyle}>
@@ -288,7 +295,7 @@ function EmojiView({ report }: { report: ReportPayload }) {
   const stats = report.stats;
   return (
     <>
-      <SectionBlock kicker="表情" title="表情偏好">
+      <SectionBlock title="表情偏好">
         <div className="v2-stack">
           <EmojiBoard emojis={stats.emojis} />
           <EmojiSpecificityChart catalog={stats.emojis} items={stats.emoji_specificity} />
@@ -296,7 +303,7 @@ function EmojiView({ report }: { report: ReportPayload }) {
         </div>
       </SectionBlock>
       {stats.dual_report_extras ? (
-        <SectionBlock kicker="专属" title="双人专属表情">
+        <SectionBlock title="双人专属表情">
           <MetricGrid items={[
             ["A 专属", <EmojiInlineList items={stats.dual_report_extras.p1_exclusive_emojis} />],
             ["B 专属", <EmojiInlineList items={stats.dual_report_extras.p2_exclusive_emojis} />],
@@ -311,10 +318,10 @@ function InteractionView({ report }: { report: ReportPayload }) {
   const stats = report.stats;
   return (
     <>
-      <SectionBlock kicker="互动" title="互动网络">
+      <SectionBlock title="互动网络">
         <InteractionMatrixPanel items={stats.interaction_matrix} mentions={stats.at_mention_stats} sendRatio={stats.send_ratio} />
       </SectionBlock>
-      <SectionBlock kicker="主动性" title="主动与分享">
+      <SectionBlock title="主动与分享">
         <div className="v2-stack">
           <InitiativeRanking scores={stats.initiative_scores} />
           <LinkStatsList links={stats.link_stats} />
@@ -328,13 +335,13 @@ function EmotionView({ report }: { report: ReportPayload }) {
   const stats = report.stats;
   return (
     <>
-      <SectionBlock kicker="情绪" title="总体温度">
+      <SectionBlock title="总体温度">
         <div className="v2-stack">
           {stats.sentiment_overview ? <SentimentGauge sentiment={stats.sentiment_overview} /> : <p className="muted">暂无情绪数据。</p>}
           <MonthlySentimentTrend data={stats.monthly_sentiment} />
         </div>
       </SectionBlock>
-      <SectionBlock kicker="成员" title="成员情绪标签">
+      <SectionBlock title="成员情绪标签">
         <div style={gridStyle}>
           {stats.per_contact_sentiment.map((item) => (
             <div key={item.name} style={cardStyle}>
@@ -356,13 +363,13 @@ function MediaView({ report }: { report: ReportPayload }) {
   const stats = report.stats;
   return (
     <>
-      <SectionBlock kicker="类型" title="消息结构">
+      <SectionBlock title="消息结构">
         <div className="v2-stack">
           <MessageTypeChart types={stats.message_type_breakdown} />
           <MessageTypeEvolutionPanel evolution={stats.message_type_evolution} recall={stats.recall_stats} redPacket={stats.red_packet_overview} />
         </div>
       </SectionBlock>
-      <SectionBlock kicker="链接" title="链接趋势">
+      <SectionBlock title="链接趋势">
         <div className="v2-stack">
           <LinkStatsList links={stats.link_stats} />
           <div style={gridStyle}>
@@ -422,17 +429,16 @@ function RelationshipView({ report }: { report: ReportPayload }) {
   const stats = report.stats;
   return (
     <>
-      <SectionBlock kicker="关系" title="关系结构">
+      <SectionBlock title="关系结构">
         <div className="v2-stack">
           <RelationshipMap edges={stats.relationship_edges} />
           <RelationshipScoreboard metrics={stats.relationship_metrics ?? []} />
           {stats.dual_report_extras ? <DualReportExtrasCard extras={stats.dual_report_extras} /> : null}
         </div>
       </SectionBlock>
-      <SectionBlock kicker="走势" title="走势与里程碑">
+      <SectionBlock title="走势与里程碑">
         <div className="v2-stack">
           <RelationshipCandles report={report} />
-          {stats.first_chat ? <FirstChatCard data={stats.first_chat} /> : null}
           <MilestonesTimeline milestones={stats.relationship_milestones} />
         </div>
       </SectionBlock>
@@ -444,7 +450,13 @@ function QuotesView({ report }: { report: ReportPayload }) {
   const stats = report.stats;
   return (
     <>
-      <SectionBlock kicker="金句" title="AI 标注的名场面">
+      <ContentHighlightsPanel
+        compact
+        highlights={report.content_highlights}
+        title="带证据的名场面"
+        intro="这里展示的是实际参考的上下文，不只是孤立的一句金句。"
+      />
+      <SectionBlock title="带标注的名场面">
         <div className="v2-stack">
           {report.quotes.length ? (
             <div style={gridStyle}>
@@ -465,10 +477,9 @@ function QuotesView({ report }: { report: ReportPayload }) {
           <FamousQuotesPanel quotes={stats.famous_quotes} />
         </div>
       </SectionBlock>
-      <SectionBlock kicker="回放" title="关系开场">
+      <SectionBlock title="关系开场">
         <div className="v2-stack">
           {stats.first_chat ? <FirstChatCard data={stats.first_chat} /> : <p className="muted">暂无最初对话记录。</p>}
-          <MilestonesTimeline milestones={stats.relationship_milestones} />
         </div>
       </SectionBlock>
     </>
@@ -479,13 +490,13 @@ function PredictionsView({ report }: { report: ReportPayload }) {
   const stats = report.stats;
   return (
     <>
-      <SectionBlock kicker="预测" title="下一阶段预测">
+      <SectionBlock title="下一阶段预测">
         <div className="v2-stack">
           <PredictionsCard predictions={stats.predictions} />
           <PersonalityBadgeGrid badges={stats.personality_badges} />
         </div>
       </SectionBlock>
-      <SectionBlock kicker="信号" title="AI 参考的聊天信号">
+      <SectionBlock title="参考的聊天信号">
         <MetricGrid items={[
           ["活跃天数", stats.chat_dna?.active_days ?? "—", "判断趋势是否稳定"],
           ["峰值时段", stats.chat_dna ? `${stats.chat_dna.top_hour}:00` : "—", "观察热聊更常出现的时间"],
@@ -555,7 +566,7 @@ export function InsightsPage() {
     return (
       <main className="page state-page">
         <Loader2 className="spin" />
-        <p>聊天分镜加载中...</p>
+        <p>中间分析页加载中...</p>
       </main>
     );
   }
