@@ -723,7 +723,11 @@ export function UploadPage() {
         <Link className="brand" to="/">
           <span>判</span>赛博判官
         </Link>
-        <div className="nav-links" />
+        <div className="nav-links">
+          <a href="#wechat-import">微信导入</a>
+          <a href="#json-import">JSON</a>
+          <a href="#model-settings">模型</a>
+        </div>
       </nav>
 
       <section className="upload-layout">
@@ -789,7 +793,7 @@ export function UploadPage() {
             </button>
           </div>
 
-          <div className="wechat-import-panel">
+          <div className="wechat-import-panel" id="wechat-import">
             <div className="wechat-import-head">
               <div>
                 <p className="eyebrow">本机微信</p>
@@ -962,7 +966,7 @@ export function UploadPage() {
             </Button>
           </div>
 
-          <div className="wechat-import-panel">
+          <div className="wechat-import-panel" id="json-import">
             <div className="wechat-import-head">
               <div>
                 <p className="eyebrow">手动 JSON</p>
@@ -1041,7 +1045,7 @@ export function UploadPage() {
               <span><Quote size={16} /> 生成中间页和最终报告</span>
             </div>
           </div>
-          <div className="llm-settings-panel">
+          <div className="llm-settings-panel" id="model-settings">
             <div className="llm-settings-head">
               <div>
                 <p className="eyebrow">模型设置</p>

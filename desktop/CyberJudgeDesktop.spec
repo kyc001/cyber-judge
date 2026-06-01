@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all
@@ -8,7 +9,7 @@ from PyInstaller.utils.hooks import collect_all
 ROOT = Path(SPECPATH).resolve().parent
 BACKEND = ROOT / "backend"
 WECHAT_DECRYPT = BACKEND / "wechat_decrypt"
-FRONTEND_DIST = ROOT / "frontend" / "dist"
+FRONTEND_DIST = Path(os.environ.get("CYBER_JUDGE_FRONTEND_DIST", ROOT / "frontend" / "dist"))
 
 datas = [
     (str(FRONTEND_DIST), "frontend/dist"),
