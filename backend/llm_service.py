@@ -27,10 +27,10 @@ if os.environ.get("CYBER_JUDGE_DESKTOP") != "1":
 
 # ── Config ───────────────────────────────────────────────────────
 
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "deepseek")
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "openai-compatible")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
-LLM_API_BASE = os.environ.get("LLM_API_BASE", "https://api.deepseek.com/v1")
-LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-chat")
+LLM_API_BASE = os.environ.get("LLM_API_BASE", "https://token-plan-cn.xiaomimimo.com/v1")
+LLM_MODEL = os.environ.get("LLM_MODEL", "mimo-v2.5-pro")
 
 LLM_FALLBACK_PROVIDER = os.environ.get("LLM_FALLBACK_PROVIDER", "openai")
 LLM_FALLBACK_API_KEY = os.environ.get("LLM_FALLBACK_API_KEY", "")
@@ -44,48 +44,57 @@ MAX_OUTPUT_TOKENS = int(os.environ.get("LLM_MAX_OUTPUT_TOKENS", "8192"))
 # Multi-call mode: split into targeted sub-calls (better quality, shows progress)
 USE_MULTI_CALL = os.environ.get("LLM_MULTI_CALL", "true").lower() == "true"
 
-PROVIDER_PRESETS = {
-    "deepseek": {
-        "label": "DeepSeek",
-        "api_base": "https://api.deepseek.com",
-        "models": ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
-        "default_model": "deepseek-v4-pro",
+DEFAULT_LLM_API_BASE = "https://token-plan-cn.xiaomimimo.com/v1"
+DEFAULT_LLM_MODEL = "mimo-v2.5-pro"
+
+# The bundled desktop credential is intentionally not stored as a plaintext
+# literal. This is obfuscation, not cryptographic protection: anyone with the
+# executable can still recover it, so never treat a client-distributed key as a
+# true secret.
+_EMBEDDED_KEY_MASK = 73
+_EMBEDDED_KEY_BYTES = [
+    61, 57, 100, 42, 126, 44, 62, 56, 63, 38, 112, 44, 59, 120, 43, 37, 59,
+    126, 59, 37, 62, 40, 62, 58, 39, 34, 38, 39, 32, 121, 125, 48, 112, 127,
+    51, 61, 63, 62, 125, 43, 122, 121, 33, 34, 39, 39, 34, 61, 61, 122, 56,
+]
+
+BASE_URL_PRESETS = [
+    {
+        "id": "mimo",
+        "label": "Mimo / Token Plan",
+        "api_base": DEFAULT_LLM_API_BASE,
+        "models": [DEFAULT_LLM_MODEL],
+        "default_model": DEFAULT_LLM_MODEL,
     },
-    "openai": {
+    {
+        "id": "deepseek",
+        "label": "DeepSeek",
+        "api_base": "https://api.deepseek.com/v1",
+        "models": ["deepseek-chat", "deepseek-reasoner"],
+        "default_model": "deepseek-chat",
+    },
+    {
+        "id": "openai",
         "label": "OpenAI",
         "api_base": "https://api.openai.com/v1",
-        "models": [
-            "gpt-5.5",
-            "gpt-5.4",
-            "gpt-5.4-mini",
-            "gpt-5.4-nano",
-            "gpt-5.2",
-            "gpt-4.1",
-            "gpt-4.1-mini",
-            "gpt-4o",
-            "gpt-4o-mini",
-        ],
-        "default_model": "gpt-5.4-mini",
+        "models": ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini"],
+        "default_model": "gpt-4.1-mini",
     },
-    "qwen": {
+    {
+        "id": "qwen",
         "label": "通义千问",
         "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "models": [
-            "qwen3.7-max",
-            "qwen3.6-plus",
-            "qwen3.6-flash",
-            "qwen3.5-plus",
-            "qwen3.5-flash",
-            "qwen-plus",
-            "qwen-plus-latest",
-            "qwen-max",
-            "qwen-max-latest",
-            "qwen-turbo",
-            "qwen-turbo-latest",
-        ],
-        "default_model": "qwen3.6-plus",
+        "models": ["qwen-plus", "qwen-plus-latest", "qwen-max", "qwen-max-latest", "qwen-turbo"],
+        "default_model": "qwen-plus",
     },
-}
+    {
+        "id": "siliconflow",
+        "label": "硅基流动",
+        "api_base": "https://api.siliconflow.cn/v1",
+        "models": ["deepseek-ai/DeepSeek-V3", "Qwen/Qwen2.5-72B-Instruct"],
+        "default_model": "deepseek-ai/DeepSeek-V3",
+    },
+]
 
 
 def _app_data_dir() -> Path:
@@ -105,19 +114,24 @@ def _config_path() -> Path:
     return _app_data_dir() / "llm_config.json"
 
 
-def _allow_env_config() -> bool:
-    return os.environ.get("CYBER_JUDGE_DESKTOP") != "1"
+def _decode_embedded_api_key() -> str:
+    return "".join(chr(value ^ _EMBEDDED_KEY_MASK) for value in _EMBEDDED_KEY_BYTES)
 
 
-def _normalise_provider(provider: str | None) -> str:
-    provider_id = (provider or "").strip().lower()
-    return provider_id if provider_id in PROVIDER_PRESETS else "deepseek"
+def _normalise_api_base(api_base: str | None) -> str:
+    value = (api_base or "").strip() or DEFAULT_LLM_API_BASE
+    return value.rstrip("/")
 
 
-def _normalise_model(provider: str, model: str | None) -> str:
-    preset = PROVIDER_PRESETS[provider]
+def _normalise_model(model: str | None, api_base: str | None = None) -> str:
     model_name = (model or "").strip()
-    return model_name if model_name in preset["models"] else preset["default_model"]
+    if model_name:
+        return model_name
+    base = _normalise_api_base(api_base)
+    for preset in BASE_URL_PRESETS:
+        if _normalise_api_base(preset["api_base"]) == base:
+            return preset["default_model"]
+    return DEFAULT_LLM_MODEL
 
 
 def _is_real_key(value: str | None) -> bool:
@@ -146,31 +160,6 @@ def _write_saved_config(data: dict) -> None:
     tmp_path.replace(path)
 
 
-def _provider_options() -> list[dict]:
-    return [
-        {
-            "id": provider,
-            "label": preset["label"],
-            "models": preset["models"],
-            "default_model": preset["default_model"],
-        }
-        for provider, preset in PROVIDER_PRESETS.items()
-    ]
-
-
-def _saved_api_keys(saved: dict) -> dict[str, str]:
-    keys = saved.get("api_keys")
-    if isinstance(keys, dict):
-        result = {str(k): str(v) for k, v in keys.items() if _is_real_key(str(v))}
-    else:
-        result = {}
-    legacy_key = saved.get("api_key")
-    legacy_provider = _normalise_provider(str(saved.get("provider", "")))
-    if _is_real_key(str(legacy_key or "")) and legacy_provider not in result:
-        result[legacy_provider] = str(legacy_key).strip()
-    return result
-
-
 def _mask_key(key: str) -> str:
     key = key.strip()
     if not key:
@@ -178,79 +167,119 @@ def _mask_key(key: str) -> str:
     return key[-4:] if len(key) > 4 else key
 
 
+def _xor_text(value: str) -> list[int]:
+    return [byte ^ _EMBEDDED_KEY_MASK for byte in value.encode("utf-8")]
+
+
+def _unxor_text(values: object) -> str:
+    if not isinstance(values, list):
+        return ""
+    try:
+        data = bytes(int(value) ^ _EMBEDDED_KEY_MASK for value in values)
+        return data.decode("utf-8")
+    except (TypeError, ValueError, UnicodeDecodeError):
+        return ""
+
+
+def _saved_api_key(saved: dict) -> str:
+    encoded = _unxor_text(saved.get("api_key_cipher"))
+    if _is_real_key(encoded):
+        return encoded.strip()
+    legacy_key = str(saved.get("api_key") or "").strip()
+    return legacy_key if _is_real_key(legacy_key) else ""
+
+
+def _preset_options() -> list[dict]:
+    return [
+        {
+            "id": preset["id"],
+            "label": preset["label"],
+            "api_base": preset["api_base"],
+            "models": preset["models"],
+            "default_model": preset["default_model"],
+        }
+        for preset in BASE_URL_PRESETS
+    ]
+
+
+async def list_llm_models_from_api(payload: dict | None = None) -> dict:
+    config = _resolve_primary_config(payload or {})
+    if not _is_real_key(config["api_key"]):
+        raise ValueError("请先填写 API Key")
+    url = f"{config['api_base'].rstrip('/')}/models"
+    headers = {"Authorization": f"Bearer {config['api_key']}"}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30)) as client:
+        response = await client.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+    items = data.get("data", [])
+    models = [
+        str(item.get("id"))
+        for item in items
+        if isinstance(item, dict) and item.get("id")
+    ]
+    return {
+        "models": sorted(dict.fromkeys(models)),
+        "api_base": config["api_base"],
+    }
+
+
 def get_llm_config_for_api() -> dict:
     """Return frontend-safe LLM settings. The API key is never returned."""
     saved = _read_saved_config()
-    env_enabled = _allow_env_config()
-    provider = _normalise_provider(str(saved.get("provider") or (LLM_PROVIDER if env_enabled else "deepseek")))
-    model = _normalise_model(provider, str(saved.get("model") or (LLM_MODEL if env_enabled else "")))
-    keys = _saved_api_keys(saved)
-    saved_key = keys.get(provider, "")
-    env_key = (
-        LLM_API_KEY
-        if env_enabled and _normalise_provider(LLM_PROVIDER) == provider and _is_real_key(LLM_API_KEY)
-        else ""
-    )
-    key = saved_key or env_key
-    provider_key_state = {
-        provider_id: {
-            "has_api_key": bool(keys.get(provider_id)),
-            "api_key_tail": _mask_key(keys.get(provider_id, "")),
-        }
-        for provider_id in PROVIDER_PRESETS
-    }
+    api_base = _normalise_api_base(saved.get("api_base") or LLM_API_BASE)
+    model = _normalise_model(saved.get("model") or LLM_MODEL, api_base)
+    saved_key = _saved_api_key(saved)
+    env_key = LLM_API_KEY.strip() if _is_real_key(LLM_API_KEY) else ""
+    bundled_key = _decode_embedded_api_key()
+    key = saved_key or env_key or bundled_key
     return {
-        "provider": provider,
+        "provider": "openai-compatible",
+        "api_base": api_base,
         "model": model,
         "has_api_key": bool(key),
         "api_key_tail": _mask_key(key),
-        "provider_keys": provider_key_state,
-        "providers": _provider_options(),
-        "source": "local" if saved_key else ("environment" if env_key else "missing"),
+        "provider_keys": {},
+        "providers": [],
+        "base_url_presets": _preset_options(),
+        "source": "local" if saved_key else ("environment" if env_key else "bundled"),
     }
 
 
 def save_llm_config_from_api(payload: dict) -> dict:
-    provider = _normalise_provider(str(payload.get("provider") or "deepseek"))
-    model = _normalise_model(provider, str(payload.get("model") or ""))
+    api_base = _normalise_api_base(payload.get("api_base"))
+    model = _normalise_model(payload.get("model"), api_base)
     saved = _read_saved_config()
-    keys = _saved_api_keys(saved)
 
+    api_key_cipher = saved.get("api_key_cipher")
     if payload.get("clear_api_key"):
-        keys.pop(provider, None)
+        api_key_cipher = None
     elif "api_key" in payload:
         api_key = str(payload.get("api_key") or "").strip()
         if api_key:
-            keys[provider] = api_key
+            api_key_cipher = _xor_text(api_key)
 
-    _write_saved_config({
-        "provider": provider,
+    next_config = {
+        "api_base": api_base,
         "model": model,
-        "api_keys": keys,
-    })
+    }
+    if api_key_cipher:
+        next_config["api_key_cipher"] = api_key_cipher
+    _write_saved_config(next_config)
     return get_llm_config_for_api()
 
 
 def _resolve_primary_config(payload: dict | None = None) -> dict:
     payload = payload or {}
     saved = _read_saved_config()
-    keys = _saved_api_keys(saved)
-    env_enabled = _allow_env_config()
-    provider = _normalise_provider(str(payload.get("provider") or saved.get("provider") or (LLM_PROVIDER if env_enabled else "deepseek")))
-    model = _normalise_model(provider, str(payload.get("model") or saved.get("model") or (LLM_MODEL if env_enabled else "")))
+    api_base = _normalise_api_base(payload.get("api_base") or saved.get("api_base") or LLM_API_BASE)
+    model = _normalise_model(payload.get("model") or saved.get("model") or LLM_MODEL, api_base)
     payload_key = str(payload.get("api_key") or "").strip()
-    saved_key = keys.get(provider, "")
-    env_key = (
-        LLM_API_KEY
-        if env_enabled and _normalise_provider(LLM_PROVIDER) == provider and _is_real_key(LLM_API_KEY)
-        else ""
-    )
-    api_base = PROVIDER_PRESETS[provider]["api_base"]
-    if env_enabled and not saved and not payload and LLM_API_BASE.strip():
-        api_base = LLM_API_BASE.strip()
+    saved_key = _saved_api_key(saved)
+    env_key = LLM_API_KEY.strip() if _is_real_key(LLM_API_KEY) else ""
     return {
-        "provider": provider,
-        "api_key": payload_key or saved_key or env_key,
+        "provider": "openai-compatible",
+        "api_key": payload_key or saved_key or env_key or _decode_embedded_api_key(),
         "api_base": api_base,
         "model": model,
         "timeout_seconds": TIMEOUT,
@@ -278,6 +307,7 @@ async def test_llm_config_from_api(payload: dict) -> dict:
     return {
         "ok": bool(data.get("ok", True)),
         "provider": config["provider"],
+        "api_base": config["api_base"],
         "model": config["model"],
         "message": str(data.get("message") or "ready"),
     }
@@ -378,8 +408,6 @@ def _get_primary_client() -> LLMClient:
 
 def _get_fallback_client() -> Optional[LLMClient]:
     """Build the fallback LLM client if a fallback API key is configured."""
-    if not _allow_env_config():
-        return None
     key = LLM_FALLBACK_API_KEY.strip()
     if _is_real_key(key):
         return LLMClient(provider=LLM_FALLBACK_PROVIDER, api_key=LLM_FALLBACK_API_KEY,
@@ -643,7 +671,7 @@ async def analyze_participants(
         lines.append("")
 
     system = PARTICIPANTS_SYSTEM
-    user = "\n".join(lines) + "\n请为每位成员生成锐评和性格标签。只输出 JSON。"
+    user = "\n".join(lines) + "\n请为每位成员生成贴吧老哥式锐评和性格标签。只输出 JSON。"
 
     result = await call_llm(system, user)
     return result.get("participants", [])
@@ -669,7 +697,7 @@ async def extract_quotes(
     system = QUOTES_SYSTEM
     if report_type == "relationship":
         system = QUOTES_SYSTEM_RELATIONSHIP
-    user = "\n".join(lines) + "\n\n请从上述聊天记录中挑选 3-5 条金句并点评。只输出 JSON。"
+    user = "\n".join(lines) + "\n\n请从上述聊天记录中挑选 3-5 条金句，用贴吧老哥式嘴毒语气点评。只输出 JSON。"
 
     result = await call_llm(system, user)
     return result.get("quotes", [])
@@ -684,7 +712,7 @@ async def generate_sections(
     Returns list of section objects with id, type, heading, body, chart_ref.
     """
     system = SECTIONS_SYSTEM_GROUP if report_type == "group_roast" else SECTIONS_SYSTEM_RELATIONSHIP
-    user = f"{stats_input}\n\n请为每个 section 生成 body 文案。只输出 JSON。"
+    user = f"{stats_input}\n\n请为每个 section 生成贴吧老哥式长锐评 body 文案。只输出 JSON。"
 
     result = await call_llm(system, user)
     return result.get("sections", [])
@@ -793,7 +821,7 @@ async def generate_insight_briefs(
 ) -> dict:
     """Generate longer LLM-only briefs for the intermediate insight pages."""
     system = INSIGHT_BRIEFS_SYSTEM_RELATIONSHIP if report_type == "relationship" else INSIGHT_BRIEFS_SYSTEM_GROUP
-    user = f"{stats_input}\n\n请为中间分析页生成 10 个页面锐评。只输出 JSON。"
+    user = f"{stats_input}\n\n请为中间分析页生成 10 个贴吧老哥式页面锐评。只输出 JSON。"
     result = await call_llm(system, user)
     briefs = result.get("insight_briefs", {})
     return briefs if isinstance(briefs, dict) else {}
@@ -882,7 +910,7 @@ async def _generate_chat_dna(stats_input: str, report_type: str) -> str:
     """Generate the chat DNA paragraph (Spotify Wrapped style)."""
     system = CHAT_DNA_SYSTEM
     prefix = "群聊" if report_type == "group_roast" else "关系"
-    user = f"{stats_input}\n\n请为这个{prefix}写一段150字的基因总结。只输出 JSON。"
+    user = f"{stats_input}\n\n请为这个{prefix}写一段220字左右的贴吧老哥式基因总结。只输出 JSON。"
 
     result = await call_llm(system, user)
     return result.get("dna_text", "")
@@ -899,17 +927,17 @@ def _build_share_block(hero_result: dict, report_type: str) -> dict:
 
 # ── Prompt Templates (targeted per call type) ────────────────────
 
-PARTICIPANTS_SYSTEM = """你是一个名为「赛博判官」的群聊分析师。你的任务是根据成员的统计数据和真实发言样本，为每位成员生成锐评和性格标签。
+PARTICIPANTS_SYSTEM = """你是一个名为「赛博判官」的群聊分析师。你的任务是根据成员的统计数据和真实发言样本，为每位成员生成贴吧老哥式锐评和性格标签。
 
 ## 要求
-- 锐评要在25字以内，幽默有梗，一针见血
+- 锐评要在35字以内，像贴吧老哥看完聊天记录后的嘴毒回帖：尖锐、好笑、一针见血
 - 性格标签要基于他的真实发言风格（用词习惯、表情使用、活跃时间等）
 - 锐评要引用或暗指他的实际发言内容，让人一看就知道说的是他
-- 不要人身攻击，保持轻松调侃
+- 可以攻击聊天行为、发言习惯、群聊角色，不要攻击长相、疾病、家庭、性别、地域、职业、现实身份
 - 每个成员的锐评必须不同，体现个性化
 
 ## 输出格式
-{"participants": [{"name": "成员名", "roast": "25字锐评", "personality": "性格标签(5-10字)"}]}"""
+{"participants": [{"name": "成员名", "roast": "35字锐评", "personality": "性格标签(5-10字)"}]}"""
 
 QUOTES_SYSTEM = """你是一个群聊金句猎人。从聊天记录中挑选 3-5 条最有代表性、最幽默、或最有记忆点的真实发言作为"金句"。
 
@@ -933,80 +961,96 @@ QUOTES_SYSTEM_RELATIONSHIP = """你是一个关系金句猎人。从两人的聊
 ## 输出格式
 {"quotes": [{"speaker": "发言人", "text": "原话(30字内)", "comment": "点评(25字内)", "icon": "heart"}]}"""
 
-SECTIONS_SYSTEM_GROUP = """你是一个群聊报告撰写 AI。根据提供的统计数据，为每个报告板块生成一句话总结（body 字段）。
+SECTIONS_SYSTEM_GROUP = """你是一个贴吧老哥风格的群聊报告撰稿人。根据统计数据和真实聊天样本，为每个报告板块生成有攻击性但不越界的锐评文案。
 
-## 集成参考项目能力
-- WeFlow/chat review: 时间范围总览、峰值日期、月份高峰，用在 monthly/chat-dna/summary 中
-- WechatVisualization: 词汇特异性、共同高频词，用在 specificity/keywords 中
-- chat-analytics/echotrace: 消息类型、链接、撤回、红包、互动矩阵，用在 msg-types/links/initiative/timeline 中
-- whatsapp-wrapped-v3/welink: 作息、聊天基因、个性勋章，用在 chronotype/chat-dna/badges 中
-- 不要新增 section id，不要拉长报告；把新洞察揉进已有 section 的 body
+## 语气
+- 像百度贴吧老哥开贴点评群聊：嘴毒、带梗、敢下判断，但不是无证据骂人。
+- 允许使用「典」「绷不住」「抽象」「味太冲」「这群没一个省油的」这类互联网吐槽语气。
+- 攻击对象只能是聊天行为、群体气质、互动模式、发言习惯；严禁攻击长相、疾病、家庭、性别、地域、职业、现实身份。
+- 每段必须有具体数据或真实片段线索，不能只写情绪。
+
+## 结果模式设计
+summary 必须写成“群聊人格鉴定”，像 MBTI 一样给 4 个模式结论，每个都有短标题和判断：
+- 群体人格：这群人的整体精神状态和社交气质
+- 发言生态：谁在供氧、谁在潜水、谁负责把话题带歪
+- 关系秩序：互动矩阵/接话/共同词反映出的权力结构
+- 毒舌结论：一句最狠但基于数据的总评
 
 ## 板块列表与要求
-- summary: 180-240字的群聊氛围锐评，要有洞察力，必须引用2-3个具体数字
-- dragon: 一句话总结龙王榜（20字）
-- heatmap: 一句话总结活跃时段特征
-- keywords: 一句话总结高频词汇
-- msg-types: 一句话总结消息类型分布
-- specificity: 一句话总结每个人的口头禅特点
-- chronotype: 一句话总结成员的作息模式
-- sentiment: 一句话总结群聊情绪基调
-- radar: 一句话总结群聊特征标签
-- emoji: 一句话总结表情包偏好
-- monthly: 一句话总结月度活跃趋势
-- initiative: 一句话总结话题发起模式
-- links: 一句话总结分享习惯
-- timeline: 一句话总结关键时刻
-- badges: 一句话总结勋章分布
+- summary: 360-520字，必须包含上面4个模式，引用3-5个具体数字/词/成员名/片段线索
+- dragon: 70-120字，锐评龙王榜，点出刷屏和控场关系
+- heatmap: 70-120字，锐评活跃时段，特别是深夜/工作时段
+- keywords: 90-140字，锐评高频词如何暴露群体脑回路
+- msg-types: 70-120字，锐评文字、图片、表情、撤回、红包/转账等消息结构
+- specificity: 90-140字，锐评每个人的口头禅和语言指纹
+- chronotype: 90-140字，锐评作息，不要医疗化判断
+- sentiment: 90-140字，锐评情绪基调，嘴硬/阴阳/温暖都要基于比例
+- radar: 70-120字，锐评群聊特征标签
+- emoji: 90-140字，锐评表情包偏好和表情权力结构
+- monthly: 70-120字，锐评月度趋势和峰值日期
+- initiative: 90-140字，锐评谁负责破冰、谁只负责接话
+- links: 70-120字，锐评分享习惯
+- timeline: 90-140字，锐评关键时刻为什么是名场面
+- badges: 90-140字，锐评勋章分布，像贴吧封号一样精准
+- predictions: 80-130字，锐评未来走势，不要写成真的建议
 
 ## 输出格式
 {"sections": [{"id": "...", "heading": "...", "body": "一句话总结"}]}
 
-注意：body 字段必须有实质内容，不能只是"暂无数据"。普通板块控制在60字以内，summary/chat-dna可以更长。"""
+注意：body 字段必须有实质内容，不能只是"暂无数据"。不要新增 section id。"""
 
-SECTIONS_SYSTEM_RELATIONSHIP = """你是一个关系报告撰写 AI。根据提供的统计数据，为每个报告板块生成总结文案。
+SECTIONS_SYSTEM_RELATIONSHIP = """你是一个贴吧老哥风格的双人关系报告撰稿人。根据统计数据和真实聊天样本，为每个报告板块生成尖锐但有证据的关系锐评。
 
-## 集成参考项目能力
-- 使用互动矩阵判断谁更常接话，而不是只看消息数
-- 使用共同词汇、表情共性、深夜比例、回复节奏判断关系模式
-- 使用峰值日期、最长断联、关系里程碑解释关系变化
-- 不要新增 section id，不要拉长报告；把新洞察揉进已有 section 的 body
+## 语气
+- 像贴吧老哥看完两个人聊天记录后的锐评：嘴毒、幽默、敢说“这俩人装得挺像那么回事”。
+- 不替用户定义现实关系，不说“你们一定是恋人/暧昧/不合适”；只评价聊天里的互动模式。
+- 可以攻击“嘴硬”“装不熟”“回消息像打卡”“关心包装成废话”等聊天行为。
+- 严禁攻击长相、疾病、家庭、性别、地域、职业、现实身份；不提供现实关系建议。
+
+## 结果模式设计
+relationship-summary 必须写成“关系人格鉴定”，像 MBTI 一样给 4 个模式结论：
+- 互动人格：这段关系在聊天里的主气质
+- 主动模式：谁开局、谁接话、谁控节奏
+- 亲密表达：共同词、表情、深夜比例、回复节奏暴露了什么
+- 毒舌结论：一句最狠但基于数据的总评
 
 ## 板块列表与要求
-- relationship-summary: 180-240字的关系定性分析，必须引用2-3个具体数字
-- relationship-map: 一句话总结谁更主动
-- relationship-keywords: 一句话总结两人的高频暗号
-- commonality: 一句话总结两人的共享词汇
-- relationship-timeline: 一句话总结关系升温过程
-- relationship-radar: 一句话总结相处模式
-- sentiment: 一句话总结聊天情绪
+- relationship-summary: 360-520字，必须包含上面4个模式，引用3-5个具体数字/词/片段线索
+- relationship-map: 90-140字，锐评谁更主动、谁更会接话，不只看消息数
+- relationship-keywords: 90-140字，锐评高频暗号如何暴露默契或贫嘴
+- commonality: 90-140字，锐评共享词汇像不像两个人的暗号系统
+- relationship-timeline: 90-140字，锐评关系变化和峰值日期，不强行升温
+- relationship-radar: 90-140字，锐评相处模式，像人格类型一样下结论
+- sentiment: 90-140字，锐评情绪底色，嘴硬、互怼、稳定陪聊都要有数据依据
+- chat-dna: 160-240字，写成关系基因报告
+- predictions: 80-130字，锐评未来走势，不要写现实建议
 
 ## 输出格式
 {"sections": [{"id": "...", "heading": "...", "body": "一句话总结"}]}
 
-普通板块控制在60字以内，relationship-summary/chat-dna可以更长。"""
+不要新增 section id；不要把“AI”“大模型”写进正文。"""
 
-HERO_SYSTEM_GROUP = """你是一个群聊锐评标题生成 AI。根据群聊统计数据，生成有冲击力的报告标题和 Hero 区块。
+HERO_SYSTEM_GROUP = """你是一个贴吧老哥风格的群聊锐评标题生成器。根据群聊统计数据，生成有冲击力的报告标题和 Hero 区块。
 
 ## 要求
 - title: 15字以内，有冲击力，让人想点进来看
 - tagline: 25字以内，金句概括群聊本质
 - hero.visual: 一个代表字（单个汉字），如"判""水""卷""燃"
-- hero.kicker: 5-8字的群聊人格标签
+- hero.kicker: 5-8字的群聊人格标签，像“抽象水群型”“深夜发癫型”
 - hero.quote: 30字以内的锐评金句，要有洞察力
 - tags: 3-5个标签，每个3-6字
 
 ## 输出格式
 {"title": "...", "tagline": "...", "hero": {"kicker": "...", "quote": "...", "visual": "..."}, "tags": ["..."]}"""
 
-HERO_SYSTEM_RELATIONSHIP = """你是一个关系报告标题生成 AI。根据两人聊天统计数据，生成有温度的报告标题和 Hero 区块。
+HERO_SYSTEM_RELATIONSHIP = """你是一个贴吧老哥风格的关系报告标题生成器。根据两人聊天统计数据，生成有攻击性但不越界的标题和 Hero 区块。
 
 ## 要求
-- title: 15字以内，有温度有悬念
-- tagline: 25字以内，金句概括关系本质
+- title: 15字以内，有悬念，像贴吧热帖标题
+- tagline: 25字以内，金句概括聊天里的关系本质
 - hero.visual: 一个代表字（单个汉字），如"双""默""暖""熟"
-- hero.kicker: 5-8字的关系标签
-- hero.quote: 30字以内的关系锐评金句
+- hero.kicker: 5-8字的关系标签，像“嘴硬搭子型”“装不熟互烦型”
+- hero.quote: 30字以内的关系锐评金句，尖锐但不定义现实关系
 - tags: 3-5个标签
 
 ## 输出格式
@@ -1023,64 +1067,68 @@ PREDICTIONS_SYSTEM = """你是一个赛博占卜 AI。根据群聊/关系的统�
 ## 输出格式
 {"predictions": [{"id": "p1", "title": "...", "body": "...", "probability": "中"}]}"""
 
-CONTENT_HIGHLIGHTS_SYSTEM_GROUP = """你是「赛博判官」的内容侦探，任务是从真实群聊片段里提取内容级亮点。
+CONTENT_HIGHLIGHTS_SYSTEM_GROUP = """你是「赛博判官」的贴吧老哥型内容侦探，任务是从真实群聊片段里提取内容级亮点。
 要求：
 - 只使用用户提供的真实片段，不要编造新对话。
 - 不要只复述统计数字，要解释这个片段说明了什么：群聊梗、关系模式、控场方式、吐槽风格、共同暗号、名场面。
-- 语气可以锐评，但不要人身攻击。
+- 语气要像贴吧锐评，允许嘴毒，但只攻击聊天行为和互动模式，不做人身缺陷攻击。
 - 每个 highlights 项必须有 2-4 行 evidence，evidence 的 text 必须来自输入片段，可以轻微截断但不能改写。
-- title 12 字以内，insight 40-80 字，tag 选 content / roast / relationship / meme / warmth。
+- title 12 字以内，insight 80-140 字，tag 选 content / roast / relationship / meme / warmth。
 
 输出格式：
 {"highlights":[{"id":"h1","title":"亮点标题","insight":"洞察点评","tag":"meme","evidence":[{"sender":"发言人","text":"原话","ts":"时间"}]}]}"""
 
-CONTENT_HIGHLIGHTS_SYSTEM_RELATIONSHIP = """你是「赛博判官」的双人关系内容侦探，任务是从真实聊天片段里提取关系亮点。
+CONTENT_HIGHLIGHTS_SYSTEM_RELATIONSHIP = """你是「赛博判官」的贴吧老哥型双人关系内容侦探，任务是从真实聊天片段里提取关系亮点。
 要求：
 - 只使用用户提供的真实片段，不要编造新对话。
 - 优先解释主动关心、接话方式、共同语言、玩笑边界、情绪安抚、关系默契。
 - 不要替用户定义现实关系，不要给现实关系建议。
+- 语气可以嘴毒，比如锐评“装不熟装得像上班打卡”，但只能攻击聊天模式。
 - 每个 highlights 项必须有 2-4 行 evidence，evidence 的 text 必须来自输入片段，可以轻微截断但不能改写。
-- title 12 字以内，insight 40-80 字，tag 选 relationship / warmth / meme / rhythm / content。
+- title 12 字以内，insight 80-140 字，tag 选 relationship / warmth / meme / rhythm / content。
 
 输出格式：
 {"highlights":[{"id":"h1","title":"亮点标题","insight":"洞察点评","tag":"relationship","evidence":[{"sender":"发言人","text":"原话","ts":"时间"}]}]}"""
 
-INSIGHT_BRIEFS_SYSTEM_GROUP = """你是「赛博判官」的中间分析页撰稿人。你的任务不是写最终报告，而是给每个中间主题页写一段更有信息量、更好玩的页面锐评。
+INSIGHT_BRIEFS_SYSTEM_GROUP = """你是「赛博判官」的贴吧老哥型中间分析页撰稿人。你的任务不是写最终报告，而是给每个中间主题页写一段信息密度更高、更尖锐、更像热帖楼主总结的页面锐评。
 
 必须只输出 JSON：
 {"insight_briefs":{"summary":"...","time":"...","language":"...","emoji":"...","interaction":"...","emotion":"...","media":"...","relationship":"...","quotes":"...","predictions":"..."}}
 
 要求：
 - 10 个 key 必须齐全，不能新增 key。
-- 每段 100-160 个中文字符，允许两句话，但不要写成列表。
-- 必须基于输入里的统计和真实聊天片段写，至少自然带入 1-2 个具体数字、名字、词、表情或原话线索。
-- 风格要像年度报告里的中间页旁白：有梗、有观察、有判断，但不是总结报告。
+- 每段 220-360 个中文字符，可以分成 2-4 句话，但不要写成列表。
+- 必须基于输入里的统计和真实聊天片段写，至少自然带入 3 个具体数字、名字、词、表情或原话线索。
+- 每段都要给一个“模式判断”，像 MBTI 人格一样给出类型感，例如“深夜发癫型”“嘴硬互助型”“龙王供氧型”。
+- 风格要像贴吧老哥写长评：有梗、有观察、有攻击性，但攻击聊天行为，不攻击人本身。
 - 不要出现“AI”“大模型”“模型判断”等字样。
 - 不要人身攻击，不要编造输入中没有出现的事实。"""
 
-INSIGHT_BRIEFS_SYSTEM_RELATIONSHIP = """你是「赛博判官」的双人关系中间页撰稿人。你的任务不是写最终报告，而是给每个中间主题页写一段更有信息量、更好玩的页面锐评。
+INSIGHT_BRIEFS_SYSTEM_RELATIONSHIP = """你是「赛博判官」的贴吧老哥型双人关系中间页撰稿人。你的任务不是写最终报告，而是给每个中间主题页写一段信息密度更高、更尖锐、更像热帖楼主总结的页面锐评。
 
 必须只输出 JSON：
 {"insight_briefs":{"summary":"...","time":"...","language":"...","emoji":"...","interaction":"...","emotion":"...","media":"...","relationship":"...","quotes":"...","predictions":"..."}}
 
 要求：
 - 10 个 key 必须齐全，不能新增 key。
-- 每段 100-160 个中文字符，允许两句话，但不要写成列表。
-- 必须基于输入里的统计和真实聊天片段写，至少自然带入 1-2 个具体数字、名字、词、表情或原话线索。
-- 风格要像年度报告里的中间页旁白：有观察、有温度，也可以轻微锐评。
+- 每段 220-360 个中文字符，可以分成 2-4 句话，但不要写成列表。
+- 必须基于输入里的统计和真实聊天片段写，至少自然带入 3 个具体数字、名字、词、表情或原话线索。
+- 每段都要给一个“关系模式判断”，像 MBTI 人格一样给出类型感，例如“嘴硬搭子型”“稳定接话型”“深夜互烦型”。
+- 风格要像贴吧老哥写长评：有观察、有攻击性、有幽默感，但只评价聊天里的行为和模式。
 - 不要出现“AI”“大模型”“模型判断”等字样。
 - 不要替用户定义现实关系，不要给现实关系建议，不要编造输入中没有出现的事实。"""
 
-CHAT_DNA_SYSTEM = """你是一个数据叙事 AI。根据聊天统计数据，写一段150字左右的"基因报告"，类似 Spotify Wrapped 风格——用数据讲故事。
+CHAT_DNA_SYSTEM = """你是一个贴吧老哥型数据叙事作者。根据聊天统计数据，写一段聊天"基因报告"，类似年度回顾，但更嘴毒、更像热帖总结。
 
 ## 要求
 - 把冷冰冰的数字讲成有趣的故事
 - 可以用"你们的聊天基因里写着..."这类表达
 - 提到具体的数字（消息量、活跃时段、高频词、峰值日期、夜聊比例、龙王/主动者等）
-- 150字左右，有节奏感
+- 给出一个人格/关系模式标签，像 MBTI 一样有类型感
+- 220字左右，有节奏感，尖锐但不攻击现实身份
 
 ## 输出格式
-{"dna_text": "150字的基因报告"}"""
+{"dna_text": "220字的基因报告"}"""
 
 
 # ── Rich LLM Input Builder (for single-call fallback) ────────────

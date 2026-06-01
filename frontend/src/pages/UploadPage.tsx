@@ -8,6 +8,7 @@ import {
   downloadWechatImportJson,
   getWechatChats,
   getLlmConfig,
+  listLlmModels,
   prepareWechatData,
   saveLlmConfig,
   startWechatChatImport,
@@ -28,46 +29,34 @@ const MAX_FILE_SIZE_MB = 30;
 const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
-const DEFAULT_LLM_PROVIDERS: LlmProviderOption[] = [
+const DEFAULT_BASE_URL_PRESETS: LlmProviderOption[] = [
+  {
+    id: "mimo",
+    label: "Mimo / Token Plan",
+    api_base: "https://token-plan-cn.xiaomimimo.com/v1",
+    models: ["mimo-v2.5-pro"],
+    default_model: "mimo-v2.5-pro",
+  },
   {
     id: "deepseek",
     label: "DeepSeek",
-    models: ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
-    default_model: "deepseek-v4-pro",
-  },
-  {
-    id: "openai",
-    label: "OpenAI",
-    models: [
-      "gpt-5.5",
-      "gpt-5.4",
-      "gpt-5.4-mini",
-      "gpt-5.4-nano",
-      "gpt-5.2",
-      "gpt-4.1",
-      "gpt-4.1-mini",
-      "gpt-4o",
-      "gpt-4o-mini",
-    ],
-    default_model: "gpt-5.4-mini",
+    api_base: "https://api.deepseek.com/v1",
+    models: ["deepseek-chat", "deepseek-reasoner"],
+    default_model: "deepseek-chat",
   },
   {
     id: "qwen",
     label: "通义千问",
-    models: [
-      "qwen3.7-max",
-      "qwen3.6-plus",
-      "qwen3.6-flash",
-      "qwen3.5-plus",
-      "qwen3.5-flash",
-      "qwen-plus",
-      "qwen-plus-latest",
-      "qwen-max",
-      "qwen-max-latest",
-      "qwen-turbo",
-      "qwen-turbo-latest",
-    ],
-    default_model: "qwen3.6-plus",
+    api_base: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    models: ["qwen-plus", "qwen-plus-latest", "qwen-max", "qwen-max-latest", "qwen-turbo"],
+    default_model: "qwen-plus",
+  },
+  {
+    id: "openai",
+    label: "OpenAI",
+    api_base: "https://api.openai.com/v1",
+    models: ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini"],
+    default_model: "gpt-4.1-mini",
   },
 ];
 
@@ -86,7 +75,7 @@ type AnalysisIntent = "auto_roast" | "group_dynamics" | "relationship_lab" | "qu
 type WechatKind = "all" | "group" | "single";
 type ImportStep = { step: string; status: string; message?: string; error?: string };
 type LlmDraft = {
-  provider: string;
+  apiBase: string;
   model: string;
 };
 type JsonSavePicker = (options: {
@@ -251,28 +240,23 @@ async function saveJsonToTarget(filename: string, jsonText: string, target: Json
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function providerOptions(config: LlmConfig | null) {
-  return config?.providers?.length ? config.providers : DEFAULT_LLM_PROVIDERS;
+function baseUrlPresets(config: LlmConfig | null) {
+  return config?.base_url_presets?.length ? config.base_url_presets : DEFAULT_BASE_URL_PRESETS;
 }
 
-function providerById(providers: LlmProviderOption[], provider: string) {
-  return providers.find((item) => item.id === provider) ?? providers[0] ?? DEFAULT_LLM_PROVIDERS[0];
+function presetByBaseUrl(presets: LlmProviderOption[], apiBase: string) {
+  const normalized = apiBase.replace(/\/+$/, "");
+  return presets.find((item) => (item.api_base ?? "").replace(/\/+$/, "") === normalized);
 }
 
-function defaultModelForProvider(providers: LlmProviderOption[], provider: string) {
-  const option = providerById(providers, provider);
-  return option.default_model || option.models[0] || "";
+function defaultModelForBaseUrl(presets: LlmProviderOption[], apiBase: string) {
+  const preset = presetByBaseUrl(presets, apiBase) ?? presets[0];
+  return preset?.default_model || preset?.models[0] || "";
 }
 
-function modelOptionsForProvider(providers: LlmProviderOption[], provider: string) {
-  return providerById(providers, provider).models;
-}
-
-function keyTailForProvider(config: LlmConfig | null, provider: string) {
-  const state = config?.provider_keys?.[provider];
-  if (state?.has_api_key) return state.api_key_tail;
-  if (config?.provider === provider && config.has_api_key) return config.api_key_tail;
-  return "";
+function modelOptionsForBaseUrl(config: LlmConfig | null, apiBase: string) {
+  const preset = presetByBaseUrl(baseUrlPresets(config), apiBase);
+  return preset?.models ?? [];
 }
 
 function buildUploadPreview(raw: string): UploadPreview | null {
@@ -382,21 +366,25 @@ export function UploadPage() {
   const [wechatImportSteps, setWechatImportSteps] = useState<ImportStep[]>([]);
   const [llmConfig, setLlmConfig] = useState<LlmConfig | null>(null);
   const [llmDraft, setLlmDraft] = useState<LlmDraft>({
-    provider: DEFAULT_LLM_PROVIDERS[0].id,
-    model: DEFAULT_LLM_PROVIDERS[0].default_model,
+    apiBase: DEFAULT_BASE_URL_PRESETS[0].api_base ?? "",
+    model: DEFAULT_BASE_URL_PRESETS[0].default_model,
   });
   const [llmApiKey, setLlmApiKey] = useState("");
+  const [llmPulledModels, setLlmPulledModels] = useState<string[]>([]);
   const [llmStatus, setLlmStatus] = useState("");
   const [isSavingLlm, setIsSavingLlm] = useState(false);
   const [isTestingLlm, setIsTestingLlm] = useState(false);
+  const [isPullingModels, setIsPullingModels] = useState(false);
   const preview = useMemo(() => buildUploadPreview(text), [text]);
   const activeIntent = ANALYSIS_INTENTS.find((intent) => intent.id === analysisIntent) ?? ANALYSIS_INTENTS[0];
-  const llmProviders = useMemo(() => providerOptions(llmConfig), [llmConfig]);
-  const llmModels = useMemo(
-    () => modelOptionsForProvider(llmProviders, llmDraft.provider),
-    [llmDraft.provider, llmProviders],
-  );
-  const llmSavedTail = keyTailForProvider(llmConfig, llmDraft.provider);
+  const llmBasePresets = useMemo(() => baseUrlPresets(llmConfig), [llmConfig]);
+  const llmModels = useMemo(() => {
+    const options = [...llmPulledModels, ...modelOptionsForBaseUrl(llmConfig, llmDraft.apiBase), llmDraft.model]
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return Array.from(new Set(options));
+  }, [llmConfig, llmDraft.apiBase, llmDraft.model, llmPulledModels]);
+  const llmSavedTail = llmConfig?.has_api_key ? llmConfig.api_key_tail : "";
 
   useEffect(() => () => importSourceRef.current?.close(), []);
 
@@ -406,7 +394,7 @@ export function UploadPage() {
       .then((config) => {
         if (cancelled) return;
         setLlmConfig(config);
-        setLlmDraft({ provider: config.provider, model: config.model });
+        setLlmDraft({ apiBase: config.api_base, model: config.model });
       })
       .catch((caught) => {
         if (!cancelled) {
@@ -445,16 +433,17 @@ export function UploadPage() {
     setAnalysisIntent(nextType === "relationship" ? "relationship_lab" : "group_dynamics");
   }
 
-  function selectLlmProvider(provider: string) {
-    const model = defaultModelForProvider(llmProviders, provider);
-    setLlmDraft({ provider, model });
+  function applyLlmPreset(apiBase: string) {
+    const model = defaultModelForBaseUrl(llmBasePresets, apiBase);
+    setLlmDraft({ apiBase, model });
+    setLlmPulledModels([]);
     setLlmApiKey("");
     setLlmStatus("");
   }
 
   function buildLlmPayload(): LlmConfigUpdate {
     const payload: LlmConfigUpdate = {
-      provider: llmDraft.provider,
+      api_base: llmDraft.apiBase.trim(),
       model: llmDraft.model,
     };
     const apiKey = llmApiKey.trim();
@@ -468,9 +457,9 @@ export function UploadPage() {
     try {
       const config = await saveLlmConfig(buildLlmPayload());
       setLlmConfig(config);
-      setLlmDraft({ provider: config.provider, model: config.model });
+      setLlmDraft({ apiBase: config.api_base, model: config.model });
       setLlmApiKey("");
-      setLlmStatus(config.has_api_key ? "模型配置已保存" : "已保存模型选择，API Key 仍未填写");
+      setLlmStatus(config.has_api_key ? "模型配置已保存" : "已保存模型选择，将使用内置 Key");
     } catch (caught) {
       setLlmStatus(caught instanceof Error ? caught.message : "保存模型配置失败");
     } finally {
@@ -488,6 +477,23 @@ export function UploadPage() {
       setLlmStatus(caught instanceof Error ? caught.message : "模型连通性检查失败");
     } finally {
       setIsTestingLlm(false);
+    }
+  }
+
+  async function handlePullLlmModels() {
+    setLlmStatus("");
+    setIsPullingModels(true);
+    try {
+      const result = await listLlmModels(buildLlmPayload());
+      setLlmPulledModels(result.models);
+      if (result.models.length && !result.models.includes(llmDraft.model)) {
+        setLlmDraft((current) => ({ ...current, model: result.models[0] }));
+      }
+      setLlmStatus(result.models.length ? `已拉取 ${result.models.length} 个模型` : "接口返回为空，可手动输入模型名");
+    } catch (caught) {
+      setLlmStatus(caught instanceof Error ? caught.message : "拉取模型列表失败");
+    } finally {
+      setIsPullingModels(false);
     }
   }
 
@@ -1039,44 +1045,66 @@ export function UploadPage() {
             <div className="llm-settings-head">
               <div>
                 <p className="eyebrow">模型设置</p>
-                <h2>选择报告生成模型</h2>
+                <h2>配置报告生成模型</h2>
               </div>
               <span className={`llm-key-state ${llmSavedTail ? "llm-key-ready" : ""}`}>
-                {llmSavedTail ? `已保存 · ${llmSavedTail}` : "未填写 Key"}
+                {llmSavedTail ? `Key · ${llmSavedTail}` : llmConfig?.source === "bundled" ? "内置 Key" : "未填写 Key"}
               </span>
             </div>
-            <div className="llm-provider-grid" role="radiogroup" aria-label="选择模型服务商">
-              {llmProviders.map((provider) => (
-                <button
-                  aria-checked={llmDraft.provider === provider.id}
-                  className={`llm-provider-option ${llmDraft.provider === provider.id ? "llm-provider-active" : ""}`}
-                  key={provider.id}
-                  onClick={() => selectLlmProvider(provider.id)}
-                  role="radio"
-                  type="button"
-                >
-                  <span>{provider.label}</span>
-                  {keyTailForProvider(llmConfig, provider.id) ? <small>Key 已保存</small> : <small>待填写</small>}
-                </button>
-              ))}
+            <label className="llm-field">
+              <span>Base URL</span>
+              <input
+                list="llm-base-url-presets"
+                onChange={(event) => {
+                  setLlmDraft((current) => ({ ...current, apiBase: event.target.value }));
+                  setLlmPulledModels([]);
+                }}
+                placeholder="https://api.example.com/v1"
+                value={llmDraft.apiBase}
+              />
+              <datalist id="llm-base-url-presets">
+                {llmBasePresets.map((preset) => (
+                  <option key={preset.id} label={preset.label} value={preset.api_base ?? ""} />
+                ))}
+              </datalist>
+            </label>
+            <div className="llm-preset-row" aria-label="常见 Base URL">
+              {llmBasePresets.map((preset) => {
+                const apiBase = preset.api_base ?? "";
+                const active = apiBase.replace(/\/+$/, "") === llmDraft.apiBase.replace(/\/+$/, "");
+                return (
+                  <button
+                    aria-pressed={active}
+                    className={`llm-preset-chip ${active ? "llm-preset-active" : ""}`}
+                    key={preset.id}
+                    onClick={() => applyLlmPreset(apiBase)}
+                    type="button"
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
             </div>
             <label className="llm-field">
               <span>模型</span>
-              <select
+              <input
+                list="llm-model-options"
                 onChange={(event) => setLlmDraft((current) => ({ ...current, model: event.target.value }))}
+                placeholder="mimo-v2.5-pro"
                 value={llmDraft.model}
-              >
+              />
+              <datalist id="llm-model-options">
                 {llmModels.map((model) => (
-                  <option key={model} value={model}>{model}</option>
+                  <option key={model} value={model} />
                 ))}
-              </select>
+              </datalist>
             </label>
             <label className="llm-field">
               <span>API Key</span>
               <input
                 autoComplete="off"
                 onChange={(event) => setLlmApiKey(event.target.value)}
-                placeholder={llmSavedTail ? "不填则继续使用已保存 Key" : "粘贴当前服务商的 API Key"}
+                placeholder={llmSavedTail ? "不填则继续使用已保存 Key" : "不填则使用内置 Key，也可粘贴自己的 API Key"}
                 type="password"
                 value={llmApiKey}
               />
@@ -1099,6 +1127,15 @@ export function UploadPage() {
                 variant="ghost"
               >
                 测试
+              </Button>
+              <Button
+                disabled={isPullingModels}
+                icon={isPullingModels ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+                onClick={handlePullLlmModels}
+                type="button"
+                variant="ghost"
+              >
+                拉取模型
               </Button>
             </div>
             {llmStatus ? <p className="llm-status">{llmStatus}</p> : null}

@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all
-
 
 ROOT = Path(SPECPATH).resolve().parent
 BACKEND = ROOT / "backend"
@@ -67,7 +65,6 @@ wechat_decrypt_files = [
 for file_name in wechat_decrypt_files:
     datas.append((str(WECHAT_DECRYPT / file_name), "backend/wechat_decrypt"))
 
-binaries = []
 hiddenimports = [
     "uvicorn",
     "uvicorn.loops",
@@ -96,70 +93,52 @@ hiddenimports = [
     "config",
     "decode_image",
     "key_utils",
-    # pywebview Windows (EdgeChromium) backend chain
-    "clr",
-    "webview.platforms.edgechromium",
-    "webview.platforms.winforms",
-    "webview.platforms.mshtml",
-    "proxy_tools",
 ]
 
-# webview/pythonnet/clr_loader ship native DLLs (WebView2, WebBrowserInterop,
-# Python.Runtime) that PyInstaller only bundles via collect_all; without them
-# `import webview` fails in the frozen exe and the launcher silently falls back
-# to the browser instead of showing the embedded GUI window. The backend
-# libraries are handled by normal graph analysis + explicit hidden imports to
-# avoid bundling test/dev/optional modules.
-for package in (
+excludes = [
+    "mcp",
+    "typer",
+    "rich",
+    "rich_toolkit",
+    "pydantic_settings",
+    "jsonschema",
+    "jsonschema_specifications",
+    "referencing",
+    "httpx_sse",
     "webview",
     "pythonnet",
+    "clr",
     "clr_loader",
-):
-    collected = collect_all(package)
-    datas += collected[0]
-    binaries += collected[1]
-    hiddenimports += collected[2]
+    "proxy_tools",
+    "tkinter",
+    "_tkinter",
+    "uvicorn.protocols.websockets",
+    "uvicorn.protocols.websockets.auto",
+    "uvicorn.protocols.websockets.websockets_impl",
+    "uvicorn.protocols.websockets.wsproto_impl",
+    "uvicorn.supervisors",
+    "uvicorn.supervisors.basereload",
+    "uvicorn.supervisors.multiprocess",
+    "uvicorn.supervisors.statreload",
+    "uvicorn.supervisors.watchfilesreload",
+    "uvicorn.workers",
+    "watchfiles",
+    "websockets",
+    "fastapi.testclient",
+    "starlette.testclient",
+]
 
 
 a = Analysis(
     [str(ROOT / "desktop" / "cyber_judge_desktop.py")],
     pathex=[str(ROOT), str(BACKEND), str(WECHAT_DECRYPT)],
-    binaries=binaries,
+    binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[
-        "mcp",
-        "typer",
-        "rich",
-        "rich_toolkit",
-        "pydantic_settings",
-        "jsonschema",
-        "jsonschema_specifications",
-        "referencing",
-        "httpx_sse",
-        "uvicorn.protocols.websockets",
-        "uvicorn.protocols.websockets.auto",
-        "uvicorn.protocols.websockets.websockets_impl",
-        "uvicorn.protocols.websockets.wsproto_impl",
-        "uvicorn.supervisors",
-        "uvicorn.supervisors.basereload",
-        "uvicorn.supervisors.multiprocess",
-        "uvicorn.supervisors.statreload",
-        "uvicorn.supervisors.watchfilesreload",
-        "uvicorn.workers",
-        "watchfiles",
-        "websockets",
-        "fastapi.testclient",
-        "starlette.testclient",
-        "webview.platforms.android",
-        "webview.platforms.cef",
-        "webview.platforms.cocoa",
-        "webview.platforms.gtk",
-        "webview.platforms.qt",
-    ],
+    excludes=excludes,
     noarchive=False,
     optimize=1,
 )
@@ -171,7 +150,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="CyberJudgeDesktop",
+    name="CyberJudgeDesktopLite",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
