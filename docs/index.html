@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Cyber Judge 是一个本地优先的微信聊天记录与 JSON 聊天数据分析工具，可生成统计洞察和 AI 报告。"
+    />
+    <meta property="og:title" content="Cyber Judge / 赛博判官" />
+    <meta
+      property="og:description"
+      content="导入本机微信会话或聊天 JSON，生成聊天统计、互动洞察和最终 AI 报告。"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="assets/hero.png" />
+    <title>Cyber Judge / 赛博判官</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header" aria-label="主导航">
+      <a class="brand" href="#top" aria-label="Cyber Judge 首页">
+        <span class="brand-mark">CJ</span>
+        <span>Cyber Judge</span>
+      </a>
+      <nav class="nav-links" aria-label="页面导航">
+        <a href="#features">功能</a>
+        <a href="#workflow">流程</a>
+        <a href="#privacy">隐私</a>
+        <a href="#download">下载</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <img class="hero-image" src="assets/hero.png" alt="" />
+        <div class="hero-overlay"></div>
+        <div class="hero-content">
+          <p class="eyebrow">本地优先的聊天记录分析工具</p>
+          <h1 id="hero-title">Cyber Judge / 赛博判官</h1>
+          <p class="hero-copy">
+            读取本机微信会话或聊天 JSON，自动生成统计洞察、中间主题页和最终 AI 报告。适合把一段聊天关系、一场群聊或一个长期社群的互动脉络看得更清楚。
+          </p>
+          <div class="hero-actions" aria-label="主要操作">
+            <a class="button primary" href="https://github.com/kyc001/cyber-judge/releases/download/v0.1.0/CyberJudgeDesktop.exe">
+              下载 Windows 桌面版
+            </a>
+            <a class="button secondary" href="https://github.com/kyc001/cyber-judge/releases/tag/v0.1.0">
+              查看 Release
+            </a>
+          </div>
+          <p class="release-note">当前版本：Cyber Judge Desktop v0.1.0，文件大小约 46.5 MB。</p>
+        </div>
+      </section>
+
+      <section class="intro band" aria-labelledby="intro-title">
+        <div class="section-inner split">
+          <div>
+            <p class="section-kicker">项目定位</p>
+            <h2 id="intro-title">把聊天记录变成可读、可解释、可分享的报告</h2>
+          </div>
+          <p>
+            Cyber Judge 不是云端聊天托管服务，而是一个本地运行的分析工具。它把导入、解析、统计、主题洞察、LLM 报告生成和导出串成一条完整流程，让非技术用户也能从本机数据得到一份结构化报告。
+          </p>
+        </div>
+      </section>
+
+      <section id="features" class="band light" aria-labelledby="features-title">
+        <div class="section-inner">
+          <p class="section-kicker">核心能力</p>
+          <h2 id="features-title">从数据导入到最终报告，一次走完</h2>
+          <div class="feature-grid">
+            <article class="feature-card">
+              <span class="feature-icon">01</span>
+              <h3>本机微信导入</h3>
+              <p>支持准备微信数据、读取会话列表，并按群聊、单聊、全部、日期范围进行筛选。</p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-icon">02</span>
+              <h3>手动 JSON 导入</h3>
+              <p>可上传或粘贴 WeFlow、wechat-decrypt 等工具导出的 JSON，并预览成员、时间范围和样例消息。</p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-icon">03</span>
+              <h3>多模型报告生成</h3>
+              <p>导入页可配置 DeepSeek、OpenAI、通义千问等服务商和模型，API Key 保存在本机配置中。</p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-icon">04</span>
+              <h3>主题洞察页面</h3>
+              <p>覆盖聊天总览、时间与作息、语言与梗、表情包、互动网络、情绪温度、关系走势等模块。</p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-icon">05</span>
+              <h3>桌面版体验</h3>
+              <p>Windows 版将 FastAPI 后端、React 前端和微信导入适配器打包为一个可双击启动的 exe。</p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-icon">06</span>
+              <h3>导出与分享</h3>
+              <p>最终报告支持分享链接、JSON 导出和 HTML 导出，便于保存、复盘或继续加工。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="workflow" class="band" aria-labelledby="workflow-title">
+        <div class="section-inner">
+          <p class="section-kicker">使用流程</p>
+          <h2 id="workflow-title">四步生成一份聊天分析报告</h2>
+          <ol class="steps">
+            <li>
+              <strong>选择数据来源</strong>
+              <span>从本机微信导入会话，或上传已有聊天 JSON。</span>
+            </li>
+            <li>
+              <strong>筛选分析范围</strong>
+              <span>选择群聊或单聊，设置起止日期、报告类型和匿名化选项。</span>
+            </li>
+            <li>
+              <strong>生成统计与 AI 报告</strong>
+              <span>系统解析消息、计算互动指标，并调用你配置的模型生成最终文本。</span>
+            </li>
+            <li>
+              <strong>阅读、导出、分享</strong>
+              <span>查看中间主题页和最终报告，按需要导出 JSON 或 HTML。</span>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section id="privacy" class="band dark" aria-labelledby="privacy-title">
+        <div class="section-inner split">
+          <div>
+            <p class="section-kicker">本地与隐私</p>
+            <h2 id="privacy-title">敏感数据优先留在你的电脑上</h2>
+          </div>
+          <div class="privacy-list">
+            <p>桌面版不会打包 `.env`，LLM API Key 由用户在应用内填写，并保存到本机应用数据目录。</p>
+            <p>微信导入、解析和数据库默认运行在本地。只有在生成 AI 报告时，才会按你的模型配置调用对应服务商。</p>
+            <p>发布版 exe 尚未做代码签名，首次运行时 Windows 或杀毒软件可能弹出安全提示。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="download" class="download band light" aria-labelledby="download-title">
+        <div class="section-inner download-panel">
+          <div>
+            <p class="section-kicker">下载</p>
+            <h2 id="download-title">Cyber Judge Desktop v0.1.0</h2>
+            <p>
+              当前 release 提供 Windows 桌面版 `CyberJudgeDesktop.exe`。下载后直接运行即可启动本地应用。
+            </p>
+          </div>
+          <div class="download-actions">
+            <a class="button primary" href="https://github.com/kyc001/cyber-judge/releases/download/v0.1.0/CyberJudgeDesktop.exe">
+              下载 exe
+            </a>
+            <a class="button secondary" href="https://github.com/kyc001/cyber-judge">
+              查看源码
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>Cyber Judge / 赛博判官</span>
+      <a href="https://github.com/kyc001/cyber-judge">GitHub</a>
+    </footer>
+  </body>
+</html>

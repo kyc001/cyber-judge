@@ -4,6 +4,12 @@ Cyber Judge 是一个本地优先的微信聊天记录与 JSON 聊天数据分�
 
 当前推荐的分发方式是 Windows 桌面版：把构建出的 `CyberJudgeDesktop.exe` 作为 GitHub Release 附件发布，源码仓库只保存代码、文档、锁文件和示例数据。
 
+项目展示页：
+
+```text
+https://kyc001.github.io/cyber-judge/
+```
+
 ## 功能
 
 - 本机微信导入：准备微信数据、读取会话列表，按群聊、单聊、全部、起止日期筛选。
@@ -115,6 +121,22 @@ gh release upload v0.1.0 dist-rebuild\CyberJudgeDesktop.exe --clobber
 ```text
 https://github.com/<owner>/<repo>/releases/download/v0.1.0/CyberJudgeDesktop.exe
 ```
+
+本项目当前 Windows 桌面版下载地址：
+
+```text
+https://github.com/kyc001/cyber-judge/releases/download/v0.1.0/CyberJudgeDesktop.exe
+```
+
+## GitHub Pages
+
+静态展示页位于 `docs/`：
+
+- `docs/index.html`：项目介绍、功能亮点、流程、隐私说明、下载入口。
+- `docs/styles.css`：页面样式。
+- `docs/assets/hero.png`：展示页封面图。
+
+部署由 `.github/workflows/pages.yml` 自动完成。推送 `master` 后，GitHub Actions 会把 `docs/` 发布到 GitHub Pages。
 
 ## LLM 配置
 
