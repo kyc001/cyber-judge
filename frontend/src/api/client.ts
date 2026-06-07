@@ -98,6 +98,14 @@ export async function testLlmConfig(payload: LlmConfigUpdate): Promise<LlmTestRe
   });
 }
 
+/** Pull available model IDs from the selected OpenAI-compatible endpoint. */
+export async function listLlmModels(payload: LlmConfigUpdate): Promise<{ models: string[]; api_base: string }> {
+  return requestJson<{ models: string[]; api_base: string }>("/api/llm/models", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 /** Load local WeChat sessions through the wechat-decrypt adapter. */
 export async function getWechatChats(params: {
   query?: string;

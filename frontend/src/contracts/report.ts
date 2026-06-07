@@ -99,6 +99,7 @@ export interface WechatImportProgressEvent {
 export interface LlmProviderOption {
   id: string;
   label: string;
+  api_base?: string;
   models: string[];
   default_model: string;
 }
@@ -110,16 +111,19 @@ export interface LlmProviderKeyState {
 
 export interface LlmConfig {
   provider: string;
+  api_base: string;
   model: string;
   has_api_key: boolean;
   api_key_tail: string;
   provider_keys: Record<string, LlmProviderKeyState>;
   providers: LlmProviderOption[];
-  source: "local" | "environment" | "missing";
+  base_url_presets?: LlmProviderOption[];
+  source: "local" | "environment" | "bundled" | "missing";
 }
 
 export interface LlmConfigUpdate {
-  provider: string;
+  provider?: string;
+  api_base: string;
   model: string;
   api_key?: string;
   clear_api_key?: boolean;
@@ -128,6 +132,7 @@ export interface LlmConfigUpdate {
 export interface LlmTestResponse {
   ok: boolean;
   provider: string;
+  api_base: string;
   model: string;
   message: string;
 }

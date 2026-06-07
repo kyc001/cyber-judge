@@ -14,7 +14,30 @@ from contextlib import closing
 from datetime import datetime, timedelta
 import xml.etree.ElementTree as ET
 from Crypto.Cipher import AES
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.fastmcp import FastMCP
+except ImportError:
+    class FastMCP:
+        """Tiny fallback used by the desktop import flow.
+
+        Cyber Judge imports this module for its WeChat DB helpers, not for the
+        MCP stdio server. Keeping decorators as no-ops lets the desktop package
+        exclude the heavy MCP dependency chain.
+        """
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def tool(self, *args, **kwargs):
+            def decorator(func):
+                return func
+
+            if args and callable(args[0]) and len(args) == 1 and not kwargs:
+                return args[0]
+            return decorator
+
+        def run(self):
+            raise RuntimeError("MCP dependency is not bundled in the desktop app.")
 import zstandard as zstd
 from config import _config_file_path, _DEFAULT
 from decode_image import ImageResolver

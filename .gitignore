@@ -1,8 +1,9 @@
 # Dependencies
 node_modules/
 
-# Frontend build/cache output
+# Build/cache output
 dist/
+dist-rebuild/
 build/
 __pycache__/
 *.tsbuildinfo

@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all
@@ -8,7 +9,7 @@ from PyInstaller.utils.hooks import collect_all
 ROOT = Path(SPECPATH).resolve().parent
 BACKEND = ROOT / "backend"
 WECHAT_DECRYPT = BACKEND / "wechat_decrypt"
-FRONTEND_DIST = ROOT / "frontend" / "dist"
+FRONTEND_DIST = Path(os.environ.get("CYBER_JUDGE_FRONTEND_DIST", ROOT / "frontend" / "dist"))
 
 datas = [
     (str(FRONTEND_DIST), "frontend/dist"),
@@ -79,10 +80,23 @@ hiddenimports = [
     "uvicorn.protocols.websockets.auto",
     "uvicorn.lifespan",
     "uvicorn.lifespan.on",
+    "uvicorn.supervisors",
+    "uvicorn.supervisors.basereload",
+    "uvicorn.supervisors.multiprocess",
+    "uvicorn.supervisors.statreload",
     "sqlite3",
     "_sqlite3",
     "fastapi",
+    "fastapi.middleware",
+    "fastapi.middleware.cors",
+    "fastapi.responses",
+    "fastapi.staticfiles",
     "starlette",
+    "starlette.middleware",
+    "starlette.middleware.base",
+    "starlette.middleware.cors",
+    "starlette.responses",
+    "starlette.staticfiles",
     "pydantic",
     "jieba",
     "dotenv",
@@ -91,7 +105,6 @@ hiddenimports = [
     "Crypto.Cipher",
     "Crypto.Cipher.AES",
     "zstandard",
-    "mcp",
     "wave",
     "export_all_chats",
     "mcp_server",
@@ -110,13 +123,10 @@ hiddenimports = [
 # webview/pythonnet/clr_loader ship native DLLs (WebView2, WebBrowserInterop,
 # Python.Runtime) that PyInstaller only bundles via collect_all; without them
 # `import webview` fails in the frozen exe and the launcher silently falls back
-# to the browser instead of showing the embedded GUI window.
+# to the browser instead of showing the embedded GUI window. The backend
+# libraries are handled by normal graph analysis + explicit hidden imports to
+# avoid bundling test/dev/optional modules.
 for package in (
-    "jieba",
-    "uvicorn",
-    "fastapi",
-    "starlette",
-    "pydantic",
     "webview",
     "pythonnet",
     "clr_loader",
@@ -136,9 +146,32 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        "mcp",
+        "typer",
+        "rich",
+        "rich_toolkit",
+        "pydantic_settings",
+        "jsonschema",
+        "jsonschema_specifications",
+        "referencing",
+        "httpx_sse",
+        "uvicorn.protocols.websockets.websockets_impl",
+        "uvicorn.protocols.websockets.wsproto_impl",
+        "uvicorn.supervisors.watchfilesreload",
+        "uvicorn.workers",
+        "watchfiles",
+        "websockets",
+        "fastapi.testclient",
+        "starlette.testclient",
+        "webview.platforms.android",
+        "webview.platforms.cef",
+        "webview.platforms.cocoa",
+        "webview.platforms.gtk",
+        "webview.platforms.qt",
+    ],
     noarchive=False,
-    optimize=0,
+    optimize=1,
 )
 pyz = PYZ(a.pure)
 

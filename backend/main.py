@@ -7,9 +7,10 @@ Endpoints:
   POST /api/share/:id       — Create a share link
   GET  /api/share/:slug     — Load a shared report
   POST /api/export          — Export report as json/csv/txt/html
-  GET  /api/llm/config      — Read local LLM provider/model state
-  POST /api/llm/config      — Save local LLM provider/model/key
+  GET  /api/llm/config      — Read local LLM base URL/model state
+  POST /api/llm/config      — Save local LLM base URL/model/key
   POST /api/llm/test        — Test selected LLM connection
+  POST /api/llm/models      — List models from selected LLM endpoint
   GET  /api/health          — Health check
 
 Architecture: Upload -> Parser -> Stats -> LLM (multi-call) -> Merge -> Store
@@ -44,6 +45,7 @@ from llm_service import (
     call_llm,
     call_llm_multi,
     get_llm_config_for_api,
+    list_llm_models_from_api,
     save_llm_config_from_api,
     test_llm_config_from_api,
 )
@@ -188,7 +190,7 @@ async def llm_config():
 
 @app.post("/api/llm/config")
 async def save_llm_config(req: dict):
-    """Persist local LLM provider/model/key settings."""
+    """Persist local LLM base URL/model/key settings."""
     try:
         return save_llm_config_from_api(req)
     except ValueError as exc:
@@ -206,6 +208,17 @@ async def test_llm_config(req: dict):
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(502, f"模型连通性检查失败: {exc}") from exc
+
+
+@app.post("/api/llm/models")
+async def list_llm_models(req: dict):
+    """Pull model IDs from the selected OpenAI-compatible endpoint."""
+    try:
+        return await list_llm_models_from_api(req)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, f"拉取模型列表失败: {exc}") from exc
 
 # ── SSE Progress ─────────────────────────────────────────────────
 

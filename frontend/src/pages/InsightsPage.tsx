@@ -45,16 +45,16 @@ type InsightView =
   | "emotion" | "media" | "relationship" | "quotes" | "predictions";
 
 const VIEW_META: { id: InsightView; title: string; body: string }[] = [
-  { id: "summary", title: "聊天总览", body: "把总量、时间跨度、峰值、连续聊天和聊天 DNA 做成总览。" },
-  { id: "time", title: "时间与作息", body: "拆解 24 小时活跃曲线、星期偏好、个人作息指纹和深夜占比。" },
-  { id: "language", title: "语言与梗", body: "展示词云、个人口头禅、共同词汇、n-gram 热词和名场面候选。" },
-  { id: "emoji", title: "表情包档案", body: "合并中英文微信表情别名，展示表情偏好、共性、专属性和出现时间。" },
-  { id: "interaction", title: "互动网络", body: "把发言占比、快速接话、@ 提及、主动破冰和链接分享集中看。" },
-  { id: "emotion", title: "情绪温度", body: "查看整体情绪、月度情绪趋势和每个人的情绪标签。" },
-  { id: "media", title: "消息结构", body: "聚合文本、图片、表情、文件、链接、撤回、红包和类型演变。" },
-  { id: "relationship", title: "关系走势", body: "用月度互动量、双方发言差异、里程碑和最初对话展示关系变化。" },
-  { id: "quotes", title: "名场面回放", body: "把真实聊天里的高分句子、代表语录和最初对话做成回放页。" },
-  { id: "predictions", title: "赛博占卜", body: "基于趋势给出未来预测、人格勋章和下一阶段看点。" },
+  { id: "summary", title: "总判词", body: "先给这份聊天定性：它到底是稳定陪聊、抽象水群，还是嘴硬互助局。" },
+  { id: "time", title: "作息病历", body: "看高峰、深夜占比和连续聊天，判断这群人是在生活，还是在守夜。" },
+  { id: "language", title: "语言指纹", body: "从高频词、共同暗号和口头禅里抓人设，少一点废话，多一点证据。" },
+  { id: "emoji", title: "表情包人格", body: "表情包不是装饰，是懒得打字时暴露真实态度的精神外设。" },
+  { id: "interaction", title: "权力结构", body: "谁供氧、谁接话、谁只在关键时刻冒泡，互动网络会自己招供。" },
+  { id: "emotion", title: "嘴硬温度", body: "把情绪比例和月度趋势拆开，看吐槽下面是热乎，还是纯粹犯欠。" },
+  { id: "media", title: "消息成分", body: "文本、图片、链接、撤回和红包的比例，能看出聊天到底靠什么续命。" },
+  { id: "relationship", title: "关系判型", body: "双人看默契，群聊看秩序：谁更主动、谁更会接、谁负责装死。" },
+  { id: "quotes", title: "证据展台", body: "别只看结论，真实原话才是这份锐评能不能站住脚的证据链。" },
+  { id: "predictions", title: "后续走势", body: "用已有趋势推下一阶段，不做人生导师，只做赛博围观群众。" },
 ];
 
 const cardStyle = {
@@ -113,6 +113,23 @@ function sectionBody(report: ReportPayload, ids: string[]) {
   return report.sections.find((section) => ids.includes(section.id))?.body || "";
 }
 
+function compactNumber(value: number | undefined) {
+  if (!Number.isFinite(value)) return "暂无";
+  const safeValue = value ?? 0;
+  if (safeValue >= 10000) return `${(safeValue / 10000).toFixed(1)}万`;
+  return safeValue.toLocaleString("zh-CN");
+}
+
+function pct(value: number | undefined) {
+  if (!Number.isFinite(value)) return "暂无";
+  return `${(value ?? 0).toFixed(1)}%`;
+}
+
+function joinTop(items: string[], fallback = "暂无") {
+  const visible = items.filter(Boolean).slice(0, 3);
+  return visible.length ? visible.join("、") : fallback;
+}
+
 function getAiBrief(report: ReportPayload, view: InsightView) {
   const llmBrief = report.insight_briefs?.[view]?.trim();
   if (llmBrief) return llmBrief;
@@ -142,6 +159,223 @@ function getAiBrief(report: ReportPayload, view: InsightView) {
   return briefs[view];
 }
 
+interface ModeDiagnosis {
+  mode: string;
+  subtitle: string;
+  evidence: { label: string; value: ReactNode; note: string }[];
+  verdict: string;
+}
+
+function buildModeDiagnosis(report: ReportPayload, view: InsightView): ModeDiagnosis {
+  const stats = report.stats;
+  const relationship = report.report_type === "relationship";
+  const dna = stats.chat_dna;
+  const topSender = dna?.top_sender_name || stats.participants[0]?.name || "暂无";
+  const topWord = dna?.top_word || stats.keywords[0]?.word || "暂无";
+  const topEmoji = dna?.top_emoji || stats.emojis[0]?.label || "暂无";
+  const topKeywordLine = joinTop(stats.keywords.map((item) => item.word));
+  const topNgrams = joinTop(stats.ngrams.map((item) => item.phrase));
+  const topCommonWords = joinTop(stats.word_commonality.map((item) => item.word));
+  const topInitiator = stats.initiative_scores[0]?.name || topSender;
+  const topMessageType = stats.message_type_breakdown[0]?.label || "暂无";
+  const firstParticipant = stats.participants[0]?.name || "A";
+  const secondParticipant = stats.participants[1]?.name || "B";
+
+  const sharedEvidence = [
+    { label: "消息量", value: compactNumber(dna?.total_messages), note: "聊天体量决定这份判词不是看两眼就开喷" },
+    { label: "活跃天数", value: compactNumber(dna?.active_days), note: "能坚持这么多天，说明不是一阵风" },
+    { label: "高频词", value: topWord, note: "脑回路最容易从重复词里漏出来" },
+  ];
+
+  if (view === "summary") {
+    return {
+      mode: relationship ? "嘴硬搭子型" : "龙王供氧型",
+      subtitle: relationship ? "表面像正常聊天，底层已经有固定接话协议。" : "看似一群人随便水，实际有人供氧、有人歪楼、有人装死。",
+      evidence: sharedEvidence,
+      verdict: relationship
+        ? `这不是简单的数据多，而是 ${firstParticipant} 和 ${secondParticipant} 的聊天已经形成默认线路：一个抛、一个接，嘴上都挺淡定，记录里全是破绽。`
+        : `这群的核心问题不是话多，是每个人都在自己的岗位上稳定发电。${topSender} 负责把局续上，其他人负责把话题加工成更抽象的形状。`,
+    };
+  }
+
+  if (view === "time") {
+    return {
+      mode: (dna?.late_night_ratio ?? 0) >= 20 ? "阴间作息型" : "规律续航型",
+      subtitle: "作息不是道德问题，但聊天记录会诚实暴露谁在深夜还不肯下线。",
+      evidence: [
+        { label: "高峰时段", value: dna ? `${dna.top_hour}:00` : "暂无", note: "最容易开聊的时间窗口" },
+        { label: "深夜占比", value: pct(dna?.late_night_ratio), note: "越高越像集体守夜" },
+        { label: "最长空窗", value: dna ? `${dna.longest_gap_days}天` : "暂无", note: "关系或群聊续航的掉线证据" },
+      ],
+      verdict: (dna?.late_night_ratio ?? 0) >= 20
+        ? "深夜消息占比已经有点像值班表了，嘴上说随便聊聊，身体倒是很诚实地在凌晨继续营业。"
+        : "节奏相对稳定，没到集体阴间作息的程度，但高峰时段一到，该冒泡的人还是会准时上班。",
+    };
+  }
+
+  if (view === "language") {
+    return {
+      mode: relationship ? "暗号复用型" : "梗词循环型",
+      subtitle: "语言习惯是最难演的，谁爱说什么、谁跟谁共享暗号，数据全记着。",
+      evidence: [
+        { label: "高频词", value: topKeywordLine, note: "群体脑回路的露馅现场" },
+        { label: "共同词", value: topCommonWords, note: "两个人或多人共享的暗号库存" },
+        { label: "短语", value: topNgrams, note: "复读越多，人设越稳" },
+      ],
+      verdict: relationship
+        ? "共同词不是普通词库，是两个人偷懒沟通的压缩包。别人看着像废话，你们自己知道每个词后面接哪段戏。"
+        : "高频词一排开，群体精神状态基本不用审了：不是没话找话，是把同一套梗盘到包浆还舍不得停。",
+    };
+  }
+
+  if (view === "emoji") {
+    return {
+      mode: "表情代偿型",
+      subtitle: "表情包是聊天里的替身攻击，越懒得解释，越爱甩图解决。",
+      evidence: [
+        { label: "头号表情", value: topEmoji, note: "最常用的情绪快捷键" },
+        { label: "表情种类", value: compactNumber(stats.emojis.length), note: "图库越厚，嘴越懒" },
+        { label: "专属表情", value: compactNumber(stats.emoji_specificity.length), note: "谁的表情包已经长出个人产权" },
+      ],
+      verdict: "这里的表情包不是辅助表达，是直接接管表达。能用一张图解决的，绝不浪费三行字，突出一个精神外包。",
+    };
+  }
+
+  if (view === "interaction") {
+    return {
+      mode: relationship ? "一抛一接型" : "供氧分层型",
+      subtitle: "互动结构比消息数更狠：谁开局、谁续命、谁只负责围观，一眼就能分层。",
+      evidence: [
+        { label: "主动破冰", value: topInitiator, note: "最常把沉默撕开的人" },
+        { label: "@ 提及", value: compactNumber(stats.at_mention_stats.length), note: "被点名的社交债" },
+        { label: "互动边", value: compactNumber(stats.relationship_edges.length), note: "关系网不是靠感觉画的" },
+      ],
+      verdict: relationship
+        ? "这类互动最典型：一个人负责把球抛出去，另一个人嘴上嫌弃但手上接得很稳，装不熟装得像流程管理。"
+        : "群聊不是人人平等，至少聊天记录不这么认为。有人负责供氧，有人负责加工，有人负责在关键时刻冒泡刷存在感。",
+    };
+  }
+
+  if (view === "emotion") {
+    return {
+      mode: (stats.sentiment_overview?.negative_ratio ?? 0) > 25 ? "互怼升温型" : "嘴硬温热型",
+      subtitle: "情绪不是看一句话甜不甜，而是看长期底色到底在往哪里偏。",
+      evidence: [
+        { label: "情绪标签", value: stats.sentiment_overview?.label || "暂无", note: "整体聊天底色" },
+        { label: "正向比例", value: pct(stats.sentiment_overview?.positive_ratio), note: "热乎气还剩多少" },
+        { label: "负向比例", value: pct(stats.sentiment_overview?.negative_ratio), note: "互怼浓度的量化证据" },
+      ],
+      verdict: (stats.sentiment_overview?.negative_ratio ?? 0) > 25
+        ? "吐槽和互怼含量不低，但这不等于关系差，更像一群人把关心包装成犯欠，嘴硬得很有职业素养。"
+        : "整体温度还算稳，没那么多大开大合，属于表面淡定、底层持续供暖的聊天生态。",
+    };
+  }
+
+  if (view === "media") {
+    return {
+      mode: "成分复杂型",
+      subtitle: "消息类型能看出聊天靠什么续命：靠文字、靠图、靠链接，还是靠撤回制造悬念。",
+      evidence: [
+        { label: "主类型", value: topMessageType, note: "最常用的表达方式" },
+        { label: "撤回", value: compactNumber(stats.recall_stats?.total_recalls), note: "说出口又后悔的现场" },
+        { label: "链接域名", value: compactNumber(stats.link_stats.length), note: "资讯搬运和外部话题来源" },
+      ],
+      verdict: "如果文本是主食，图片表情就是调味，链接和撤回是加戏。消息结构越杂，越说明这段聊天不是单线叙事，是多人即兴拼盘。",
+    };
+  }
+
+  if (view === "relationship") {
+    return {
+      mode: relationship ? "装不熟互烦型" : "熟人局分工型",
+      subtitle: relationship ? "不替你们定义现实关系，只判聊天里的互动模式。" : "群聊里的关系不是谁话多谁赢，而是谁能影响节奏。",
+      evidence: [
+        { label: "A 发言", value: compactNumber(stats.dual_report_extras?.p1_message_count), note: firstParticipant },
+        { label: "B 发言", value: compactNumber(stats.dual_report_extras?.p2_message_count), note: secondParticipant },
+        { label: "里程碑", value: compactNumber(stats.relationship_milestones.length), note: "聊天关系变化的节点" },
+      ],
+      verdict: relationship
+        ? "这类聊天最有意思的地方是双方都不一定直说，但节奏会替人说话。谁主动、谁接住、谁把废话变成暗号，记录里藏不住。"
+        : "群聊关系像一张小型生态网：龙王负责供氧，熟人负责接梗，潜水员负责让大家误以为群还很正常。",
+    };
+  }
+
+  if (view === "quotes") {
+    return {
+      mode: "原话破防型",
+      subtitle: "真实片段比统计更有杀伤力，因为它能证明这份锐评不是凭空嘴贱。",
+      evidence: [
+        { label: "精选片段", value: compactNumber(report.quotes.length), note: "可直接回放的代表语句" },
+        { label: "证据卡", value: compactNumber(report.content_highlights?.length), note: "带上下文的判断依据" },
+        { label: "高分原话", value: compactNumber(stats.famous_quotes.length), note: "系统筛出的名场面候选" },
+      ],
+      verdict: "看完原话再看结论，味就对了。很多关系和群聊不是被分析出来的，是自己在聊天记录里当场招供的。",
+    };
+  }
+
+  return {
+    mode: relationship ? "稳定续费型" : "循环开播型",
+    subtitle: "预测不装大师，只看已有聊天信号会把大家带到哪里。",
+    evidence: [
+      { label: "预测条目", value: compactNumber(stats.predictions.length), note: "下一阶段看点" },
+      { label: "人格勋章", value: compactNumber(stats.personality_badges.length), note: "谁的人设已经被数据钉住" },
+      { label: "主动者", value: topInitiator, note: "最可能开启下一轮聊天" },
+    ],
+    verdict: relationship
+      ? "只要主动和接话这套循环还在，聊天大概率会继续续费。区别只是下一次谁先装作随手问一句。"
+      : "这个群不会突然变正经，顶多换一批梗继续开播。只要龙王还在，冷场就只是临时加载中。",
+  };
+}
+
+function InsightNav({ active, report }: { active: InsightView; report: ReportPayload }) {
+  return (
+    <div className="insight-nav-grid" aria-label="分析页导航">
+      {VIEW_META.map((item) => (
+        <Link
+          className={`insight-nav-item ${item.id === active ? "insight-nav-active" : ""}`}
+          key={item.id}
+          to={`/insights/${report.report_id}/${item.id}`}
+        >
+          <ViewIcon id={item.id} />
+          <span>{item.title}</span>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function InsightBriefBlock({ text }: { text: string }) {
+  const paragraphs = text.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+  return (
+    <div className="insight-brief-text">
+      {(paragraphs.length ? paragraphs : [text]).map((paragraph, index) => (
+        <p key={`${paragraph.slice(0, 16)}-${index}`}>{paragraph}</p>
+      ))}
+    </div>
+  );
+}
+
+function ModeDiagnosisPanel({ diagnosis }: { diagnosis: ModeDiagnosis }) {
+  return (
+    <section className="report-section insight-diagnosis-section">
+      <div className="section-copy">
+        <p className="eyebrow">模式判定</p>
+        <h2>{diagnosis.mode}</h2>
+        <p>{diagnosis.subtitle}</p>
+      </div>
+      <div className="insight-evidence-grid">
+        {diagnosis.evidence.map((item) => (
+          <article className="insight-evidence-card" key={item.label}>
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+            <p>{item.note}</p>
+          </article>
+        ))}
+      </div>
+      <p className="insight-verdict">{diagnosis.verdict}</p>
+    </section>
+  );
+}
+
 function PageShell({
   children,
   index,
@@ -157,6 +391,7 @@ function PageShell({
   const next = VIEW_META[index + 1];
   const previousUrl = previous ? `/insights/${report.report_id}/${previous.id}` : `/report/${report.report_id}`;
   const nextUrl = next ? `/insights/${report.report_id}/${next.id}` : `/report/${report.report_id}`;
+  const diagnosis = buildModeDiagnosis(report, meta.id);
 
   return (
     <main className="page report-page">
@@ -179,9 +414,11 @@ function PageShell({
           <h1>{meta.title}</h1>
           <p className="report-tagline">{meta.body}</p>
         </section>
-        <SectionBlock title="本页锐评">
-          <p style={{ fontSize: "1.05rem", lineHeight: 1.8, margin: 0 }}>{getAiBrief(report, meta.id)}</p>
+        <InsightNav active={meta.id} report={report} />
+        <SectionBlock title="贴吧判词">
+          <InsightBriefBlock text={getAiBrief(report, meta.id)} />
         </SectionBlock>
+        <ModeDiagnosisPanel diagnosis={diagnosis} />
         {children}
         <section className="report-section">
           <div style={{ display: "grid", gap: 14 }}>
